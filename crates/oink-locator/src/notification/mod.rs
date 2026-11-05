@@ -17,6 +17,33 @@ use macos as platform;
 #[cfg(windows)]
 use windows as platform;
 
+#[cfg(not(any(target_os = "macos", windows)))]
+mod platform {
+    //! 其他平台：无原生叠加窗口，通知直接 headless。
+    use super::*;
+
+    pub(super) struct Backend;
+
+    impl Backend {
+        pub(super) fn new() -> Option<Self> {
+            None
+        }
+    }
+
+    impl Surface for Backend {
+        fn present(&mut self, _: Vec<Frame>) {}
+        fn clicks(&mut self) -> Vec<Click> {
+            Vec::new()
+        }
+        fn reduced_motion(&self) -> bool {
+            true
+        }
+    }
+
+    pub(super) fn scale_for(_: &oink_foundation::display::DisplayInfo) -> f64 {
+        1.
+    }
+}
 #[cfg(target_os = "macos")]
 pub fn scale_for(_display: &DisplayInfo) -> f64 {
     1.0
@@ -24,6 +51,10 @@ pub fn scale_for(_display: &DisplayInfo) -> f64 {
 #[cfg(windows)]
 pub fn scale_for(display: &DisplayInfo) -> f64 {
     platform::scale_for(display)
+}
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn scale_for(_display: &DisplayInfo) -> f64 {
+    1.0
 }
 
 pub const LIFETIME: Duration = Duration::from_secs(6);

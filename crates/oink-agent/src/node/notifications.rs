@@ -881,6 +881,13 @@ fn system_language() -> String {
     }
     String::from_utf16_lossy(buffer.split(|ch| *ch == 0).next().unwrap_or(&[]))
 }
+#[cfg(not(any(target_os = "macos", windows)))]
+fn system_language() -> String {
+    std::env::var("LANG")
+        .ok()
+        .and_then(|l| l.split('.').next().map(str::to_string))
+        .unwrap_or_default()
+}
 
 #[cfg(all(test, debug_assertions))]
 mod tests {

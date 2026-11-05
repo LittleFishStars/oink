@@ -12,6 +12,7 @@ members = [
     "crates/oink-network",
     "crates/oink-protocol",
     "crates/oink-agent",
+    "crates/oink-wayland",
     "crates/oink-telemetry",
     "crates/oink-crash",
     "crates/oink-audio",
@@ -44,9 +45,12 @@ oink-telemetry = { path = "crates/oink-telemetry" }
 oink-crash = { path = "crates/oink-crash" }
 oink-audio = { path = "crates/oink-audio" }
 oink-autostart = { path = "crates/oink-autostart" }
+oink-wayland = { path = "crates/oink-wayland" }
 
 # 各模块共用的第三方依赖。模块专用的依赖写在各自 crate 的 Cargo.toml 里。
 anyhow = "1"
+wayland-client = { version = "0.31", default-features = false, features = ["std"] }
+wayland-protocols = { version = "0.32", features = ["client"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"

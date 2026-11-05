@@ -20,6 +20,9 @@ mod platform;
 #[path = "windows.rs"]
 mod platform;
 
+#[cfg(not(any(target_os = "macos", windows)))]
+#[path = "stub.rs"]
+mod platform;
 #[cfg(target_os = "macos")]
 pub(crate) fn diagnose(health: &crate::diagnostics::Health, mtm: objc2::MainThreadMarker) {
     platform::diagnose(health, mtm);
