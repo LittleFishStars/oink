@@ -49,7 +49,7 @@ oink-wayland = { path = "crates/oink-wayland" }
 
 # 各模块共用的第三方依赖。模块专用的依赖写在各自 crate 的 Cargo.toml 里。
 anyhow = "1"
-wayland-client = { version = "0.31", default-features = false, features = ["std"] }
+wayland-client = { version = "0.31", default-features = false, features = ["log"] }
 wayland-protocols = { version = "0.32", features = ["client"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

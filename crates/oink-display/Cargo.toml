@@ -50,3 +50,6 @@ workspace = true
 [dev-dependencies]
 proptest = "1"
 serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+oink-wayland.workspace = true

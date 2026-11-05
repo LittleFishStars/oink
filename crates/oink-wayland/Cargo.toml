@@ -1,0 +1,26 @@
+[package]
+name = "oink-wayland"
+description = "Linux/Wayland 平台层：合成器连接、输出几何、虚拟指针/键盘注入原语（niri 等 wlr 协议系合成器）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+oink-foundation.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+wayland-client.workspace = true
+wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+wayland-protocols-misc = { version = "0.2", features = ["client"] }
+xkbcommon = { version = "0.9", default-features = false }
+rustix = { version = "1", features = ["mm", "fs"] }
+
+libc = "0.2"
+serde_json.workspace = true
+
+[lints]
+workspace = true

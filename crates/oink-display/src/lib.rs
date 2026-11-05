@@ -15,6 +15,8 @@ pub mod arrangement;
 pub mod layout;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "linux")]
+mod linux;
 pub mod projection;
 pub mod wallpaper;
 #[cfg(windows)]
@@ -68,6 +70,8 @@ pub fn platform_backend() -> Result<Box<dyn DisplayBackend>, DisplayError> {
     return macos::backend();
     #[cfg(windows)]
     return windows::backend();
+    #[cfg(target_os = "linux")]
+    return linux::LinuxDisplays::connect().map(|b| Box::new(b) as Box<dyn DisplayBackend>);
     #[allow(unreachable_code)]
     Err(DisplayError::Unsupported)
 }

@@ -122,3 +122,6 @@ windows = { version = "0.62", features = [
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+oink-wayland.workspace = true
