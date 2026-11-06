@@ -51,6 +51,7 @@ oink-wayland = { path = "crates/oink-wayland" }
 anyhow = "1"
 wayland-client = { version = "0.31", default-features = false, features = ["log"] }
 wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"

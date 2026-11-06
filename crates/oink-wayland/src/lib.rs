@@ -71,7 +71,7 @@ pub enum WaylandError {
     Connect(String),
 }
 
-pub(crate) struct State {
+pub struct State {
     /// 输出几何 + 持有 WlOutput proxy（dropping 会失去事件）。
     pub outputs: Mutex<Vec<(WlOutput, OutputInfo)>>,
     /// 输出几何代数；注入器据此重建每输出指针。
@@ -82,7 +82,7 @@ pub(crate) struct State {
     pub globals: Mutex<Globals>,
 }
 
-pub(crate) struct Globals {
+pub struct Globals {
     pub compositor: Option<WlCompositor>,
     pub shm: Option<WlShm>,
     pub seat: Option<WlSeat>,
@@ -91,7 +91,7 @@ pub(crate) struct Globals {
     pub dc_manager: Option<ZwlrDataControlManagerV1>,
 }
 
-pub(crate) type Shared = Arc<State>;
+pub type Shared = Arc<State>;
 pub(crate) struct Client;
 
 impl Dispatch<wl_registry::WlRegistry, Shared> for Client {
@@ -327,17 +327,17 @@ impl Wayland {
         }))
     }
 
-    pub(crate) fn conn(&self) -> &Connection {
+    pub fn conn(&self) -> &Connection {
         &self.conn
     }
-    pub(crate) fn qh(&self) -> &QueueHandle<Client> {
+    pub fn qh(&self) -> &QueueHandle<Client> {
         &self.qh
     }
-    pub(crate) fn shared(&self) -> &Shared {
+    pub fn shared(&self) -> &Shared {
         &self.shared
     }
 
-    pub(crate) fn with_globals<R>(&self, f: impl FnOnce(&Globals) -> R) -> R {
+    pub fn with_globals<R>(&self, f: impl FnOnce(&Globals) -> R) -> R {
         f(&self.shared.globals.lock().unwrap())
     }
 

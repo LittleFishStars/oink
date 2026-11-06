@@ -95,3 +95,9 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+oink-wayland.workspace = true
+wayland-client.workspace = true
+wayland-protocols-wlr.workspace = true
+rustix = { version = "1", features = ["pipe"] }
