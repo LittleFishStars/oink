@@ -196,6 +196,79 @@ impl KeymapFile {
     }
 }
 
+
+
+/// evdev 键码 → HID keyboard 页 usage（[`hid_to_evdev`] 的逆）。
+/// 鼠标按键（BTN_* ≥ 0x110）不在这里，由捕获层单独翻译成 `MouseButton`。
+pub fn evdev_to_hid(keycode: u32) -> Option<KeyCode> {
+    Some(KeyCode::keyboard(match keycode {
+        30 => 0x04, // A
+        48 => 0x05, // B
+        46 => 0x06, // C
+        32 => 0x07, // D
+        18 => 0x08, // E
+        33 => 0x09, // F
+        34 => 0x0a, // G
+        35 => 0x0b, // H
+        23 => 0x0c, // I
+        36 => 0x0d, // J
+        37 => 0x0e, // K
+        38 => 0x0f, // L
+        50 => 0x10, // M
+        49 => 0x11, // N
+        24 => 0x12, // O
+        25 => 0x13, // P
+        16 => 0x14, // Q
+        19 => 0x15, // R
+        31 => 0x16, // S
+        20 => 0x17, // T
+        22 => 0x18, // U
+        47 => 0x19, // V
+        17 => 0x1a, // W
+        45 => 0x1b, // X
+        21 => 0x1c, // Y
+        44 => 0x1d, // Z
+        2 => 0x1e, 3 => 0x1f, 4 => 0x20, 5 => 0x21, 6 => 0x22,
+        7 => 0x23, 8 => 0x24, 9 => 0x25, 10 => 0x26, 11 => 0x27,
+        28 => 0x28, // Return
+        1 => 0x29,  // Escape
+        14 => 0x2a, // BackSpace
+        15 => 0x2b, // Tab
+        57 => 0x2c, // Space
+        12 => 0x2d, 13 => 0x2e, 26 => 0x2f, 27 => 0x30,
+        43 => 0x31, 86 => 0x32, 39 => 0x33, 40 => 0x34,
+        41 => 0x35, 51 => 0x36, 52 => 0x37, 53 => 0x38,
+        58 => 0x39, // CapsLock
+        59 => 0x3a, 60 => 0x3b, 61 => 0x3c, 62 => 0x3d,
+        63 => 0x3e, 64 => 0x3f, 65 => 0x40, 66 => 0x41,
+        67 => 0x42, 68 => 0x43, 87 => 0x44, 88 => 0x45,
+        210 => 0x46, 70 => 0x47, 119 => 0x48, 110 => 0x49,
+        102 => 0x4a, 104 => 0x4b, 111 => 0x4c, 107 => 0x4d,
+        109 => 0x4e, 106 => 0x4f, 105 => 0x50, 108 => 0x51, 103 => 0x52,
+        69 => 0x53, 98 => 0x54, 55 => 0x55, 74 => 0x56, 78 => 0x57,
+        96 => 0x58, 79 => 0x59, 80 => 0x5a, 81 => 0x5b, 89 => 0x5c,
+        90 => 0x5d, 91 => 0x5e, 92 => 0x5f, 93 => 0x60, 94 => 0x61,
+        82 => 0x62, 83 => 0x63,
+        29 => 0xe0, 42 => 0xe1, 56 => 0xe2, 125 => 0xe3,
+        97 => 0xe4, 54 => 0xe5, 100 => 0xe6, 126 => 0xe7,
+        _ => return evdev_consumer_to_hid(keycode),
+    }))
+}
+
+/// Consumer 页媒体键（evdev KEY_* → HID consumer usage）。
+fn evdev_consumer_to_hid(keycode: u32) -> Option<KeyCode> {
+    Some(KeyCode::new(KeyCode::PAGE_CONSUMER, match keycode {
+        113 => 0xE2, // Mute
+        115 => 0xE9, // VolumeUp
+        114 => 0xEA, // VolumeDown
+        164 => 0xB3, // PlayPause
+        163 => 0xB5, // Next
+        165 => 0xB6, // Previous
+        158 => 0x92, // Stop
+        _ => return None,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +290,15 @@ mod tests {
     fn consumer_volume_maps() {
         let up = KeyCode::new(KeyCode::PAGE_CONSUMER, 0xE9);
         assert_eq!(hid_to_evdev(up), Some(115));
+    }
+
+    #[test]
+    fn evdev_roundtrip_letters_and_modifiers() {
+        for usage in [0x04u16, 0x1a, 0x1c, 0xe0, 0xe1, 0xe2, 0xe3] {
+            let hid = KeyCode::keyboard(usage);
+            let evdev = hid_to_evdev(hid).expect("has evdev");
+            assert_eq!(evdev_to_hid(evdev), Some(hid), "usage {usage:#x} 应往返一致");
+        }
     }
 
     #[test]

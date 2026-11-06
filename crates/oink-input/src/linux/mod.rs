@@ -9,9 +9,15 @@
 //!   注入目标账本一致；Wayland 客户端读不到全局光标。
 //! - 权限：注入不需要系统权限（合成器授权），两个权限位都报 `NotApplicable`。
 
+mod capture;
+mod device_loop;
+
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+use capture::{CaptureShared, DeviceControl, PointerLedger, discover_devices, set_speed};
 
 use oink_foundation::input::{
     CaptureMode, FeelProfile, InjectEvent, KeyCode, MouseButton, ScrollPhase, ScrollUnit,
@@ -40,6 +46,10 @@ struct Inner {
     mode: Mutex<CaptureMode>,
     /// 最近一次注入位置；注入前用主屏中心兜底（restore_local 的落点）。
     cursor: Mutex<Point>,
+    /// 物理输入捕获控制（设备可用性由 capture_allowed 决定）。
+    capture: CaptureShared,
+    /// 可捕获设备清单（空 = 权限不足或沙箱无 /dev/input）。
+    devices: Vec<(std::path::PathBuf, capture::DeviceKind)>,
 }
 
 pub struct LinuxInput {
@@ -73,8 +83,27 @@ impl LinuxInput {
             Some((x0, y0, x1, y1)) => Point::new(((x0 + x1) / 2) as f64, ((y0 + y1) / 2) as f64),
             None => Point::new(0., 0.),
         };
-        let inner =
-            Inner { injectors, mode: Mutex::new(CaptureMode::Local), cursor: Mutex::new(cursor) };
+        let (ledger, control, grabbed, devices) = {
+            let control = Arc::new(DeviceControl::default());
+            set_speed(&control.mouse_speed, 1.0);
+            set_speed(&control.touchpad_speed, 1.0);
+            control.natural_touchpad.store(natural_touchpad(), Ordering::Relaxed);
+            let ledger = PointerLedger::new(cursor);
+            let grabbed = Arc::new(AtomicBool::new(false));
+            let devices = discover_devices(Path::new("/dev/input"));
+            (ledger, control, grabbed, devices)
+        };
+        let inner = Inner {
+            injectors,
+            mode: Mutex::new(CaptureMode::Local),
+            cursor: Mutex::new(cursor),
+            capture: CaptureShared {
+                control,
+                ledger,
+                grabbed,
+            },
+            devices,
+        };
         let _ = self.inner.set(inner);
         Ok(self.inner.get().unwrap())
     }
@@ -93,35 +122,65 @@ impl InputBackend for LinuxInput {
     }
 
     fn start_loop(&self, mut owner: Box<dyn CaptureLoop>) -> Result<(), InputError> {
-        self.inner()?;
+        let inner = self.inner()?;
         self.started.store(true, Ordering::Release);
-        let stop = Arc::new(AtomicBool::new(false));
-        let stopping = stop.clone();
-        let thread = std::thread::Builder::new()
+        let (tx, rx) = std::sync::mpsc::channel::<oink_foundation::input::CapturedEvent>();
+        let control = inner.capture.control.clone();
+        let can_capture = !inner.devices.is_empty();
+        let owner_thread = std::thread::Builder::new()
             .name("oink-linux-input".into())
             .spawn(move || {
                 let wake_thread = std::thread::current();
                 let wake_thread2 = wake_thread.clone();
                 owner.set_wake(Arc::new(move || wake_thread2.unpark()));
-                // 本平台无物理输入捕获：路由的本地源一直不可用，注入不受影响。
-                owner.capture_available(false);
-                while !stopping.load(Ordering::Acquire) {
+                owner.capture_available(can_capture);
+                while !control.stop.load(Ordering::Acquire) {
+                    // 设备线程的事件串行喂给 owner（CaptureLoop 要求单线程调用）。
+                    while let Ok(event) = rx.try_recv() {
+                        owner.event(&event);
+                    }
                     if owner.stopped() {
                         break;
                     }
-                    let due = owner.poll(Instant::now()).unwrap_or(Instant::now() + Duration::from_secs(1));
+                    let due = owner
+                        .poll(Instant::now())
+                        .unwrap_or(Instant::now() + Duration::from_millis(50));
                     let now = Instant::now();
                     if due > now {
-                        std::thread::park_timeout(due - now);
+                        std::thread::park_timeout((due - now).min(Duration::from_millis(20)));
                     }
                 }
             })
             .map_err(|e| InputError::Platform(e.to_string()))?;
-        *wake_holder().lock().unwrap() = Some(thread);
+        *wake_holder().lock().unwrap() = Some(owner_thread);
+
+        // 设备线程：每个可捕获物理设备一个（Local 不 grab 不上报，Remote grab 并上报）。
+        if can_capture {
+            let sink: device_loop::Sink = Arc::new(move |event| {
+                let _ = tx.send(event.clone());
+            });
+            for (path, kind) in inner.devices.clone() {
+                let shared = CaptureShared {
+                    control: inner.capture.control.clone(),
+                    ledger: inner.capture.ledger.clone(),
+                    grabbed: inner.capture.grabbed.clone(),
+                };
+                let sink = sink.clone();
+                let _ = std::thread::Builder::new()
+                    .name(format!("oink-evdev-{}", path.file_name().unwrap_or_default().to_string_lossy()))
+                    .spawn(move || device_loop::device_thread(path, kind, shared, sink));
+            }
+            tracing::info!(count = inner.devices.len(), "evdev 捕获设备线程就绪");
+        } else {
+            tracing::warn!("无可用 evdev 设备或权限不足：本机只作为被控端（加入 input 组即可当源机）");
+        }
         Ok(())
     }
 
     fn stop(&self) {
+        if let Some(inner) = self.inner.get() {
+            inner.capture.control.stop.store(true, Ordering::Release);
+        }
         // 唤醒并结束捕获线程；注入器随进程退出清理。
         if let Some(handle) = wake_holder().lock().unwrap().take() {
             handle.thread().unpark();
@@ -133,11 +192,19 @@ impl InputBackend for LinuxInput {
     }
 
     fn capture_active(&self) -> Option<bool> {
-        Some(false)
+        let inner = self.inner.get()?;
+        Some(!inner.devices.is_empty() && inner.capture.grabbed.load(Ordering::Acquire))
     }
 
     fn set_mode(&self, mode: CaptureMode) -> Result<(), InputError> {
         let inner = self.inner()?;
+        let remote = matches!(mode, CaptureMode::Remote { .. });
+        inner.capture.control.remote.store(remote, Ordering::Release);
+        if let CaptureMode::Remote { park } = mode {
+            *inner.capture.ledger.park.lock().unwrap() = Some(park);
+        } else {
+            *inner.capture.ledger.park.lock().unwrap() = None;
+        }
         *inner.mode.lock().unwrap() = mode;
         Ok(())
     }
@@ -150,6 +217,7 @@ impl InputBackend for LinuxInput {
                 injectors.pointer.move_to(pos.x, pos.y);
                 let mut cursor = inner.cursor.lock().unwrap();
                 *cursor = *pos;
+                inner.capture.ledger.place(*pos);
             }
             InjectEvent::Button { button, pressed } => {
                 let Some(code) = button_code(*button) else { return Ok(()) };
@@ -179,6 +247,7 @@ impl InputBackend for LinuxInput {
                 let mut cursor = inner.cursor.lock().unwrap();
                 cursor.x += dx;
                 cursor.y += dy;
+                inner.capture.ledger.advance(*dx, *dy);
             }
             InjectEvent::TouchpadScroll { dx, dy, wheel, .. } => {
                 let discrete = match wheel.unit {
@@ -224,9 +293,12 @@ impl InputBackend for LinuxInput {
     }
 
     fn permissions(&self) -> InputPermissions {
+        let has_devices = self.inner.get().is_some_and(|i| !i.devices.is_empty());
+        // 注入不需要系统权限；当源机需要能读 /dev/input（input 组）。
+        let state = if has_devices { PermissionState::NotApplicable } else { PermissionState::Denied };
         InputPermissions {
-            accessibility: PermissionState::NotApplicable,
-            input_monitoring: PermissionState::NotApplicable,
+            accessibility: state,
+            input_monitoring: state,
             secure_input_active: false,
         }
     }
@@ -243,6 +315,36 @@ impl InputBackend for LinuxInput {
     fn injection_available(&self) -> Option<bool> {
         Some(self.wayland().has_virtual_pointer())
     }
+}
+
+/// 读 niri 配置里的触摸板自然滚动开关（非 niri 环境回退 false）。
+fn natural_touchpad() -> bool {
+    let Ok(home) = std::env::var("HOME") else { return false };
+    let Ok(text) = std::fs::read_to_string(format!("{home}/.config/niri/config.kdl")) else { return false };
+    // 只看 touchpad 块内的 natural-scroll（简单括号深度扫描）。
+    let mut depth = 0i32;
+    let mut in_touchpad = false;
+    for line in text.lines() {
+        let trimmed = line.split("//").next().unwrap_or("").trim();
+        if in_touchpad && trimmed == "natural-scroll" {
+            return true;
+        }
+        if trimmed.starts_with("touchpad") && trimmed.contains('{') {
+            in_touchpad = true;
+            depth = 1;
+            continue;
+        }
+        if in_touchpad {
+            for ch in trimmed.chars() {
+                if ch == '{' { depth += 1; }
+                if ch == '}' {
+                    depth -= 1;
+                    if depth <= 0 { in_touchpad = false; }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// 捕获线程句柄（stop 时唤醒并回收）。

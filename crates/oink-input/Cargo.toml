@@ -125,3 +125,4 @@ workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 oink-wayland.workspace = true
+evdev = "0.13"
