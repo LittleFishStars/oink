@@ -66,14 +66,9 @@ fn enqueue(app: &AppHandle, request: WindowRequest) {
             };
             #[cfg(windows)]
             let result = execute_request(&handle, request);
-            // GTK 要求窗口操作在主线程（同 macOS）；非主线程创建的窗口
-            // 对象能建立但永远不会映射到合成器。
+            // GTK/AppKit 都要求窗口操作在主线程：经 on_ui 中转；非主线程创建的
+            // 窗口对象能建立但永远不会映射到合成器。
             #[cfg(any(target_os = "macos", target_os = "linux"))]
-            let result = {
-                let request_handle = handle.clone();
-                on_ui(&handle, move || execute_request(&request_handle, request))
-            };
-            #[cfg(target_os = "macos")]
             let result = {
                 let request_handle = handle.clone();
                 on_ui(&handle, move || execute_request(&request_handle, request))
@@ -375,6 +370,20 @@ fn create_normal(app: &AppHandle, view: View) -> tauri::Result<()> {
                 return Err(error);
             }
         };
+        tracing::info!(
+            view = label,
+            visible = window.is_visible().unwrap_or(false),
+            decorated = window.is_decorated().unwrap_or(false),
+            "product window built"
+        );
+        #[cfg(target_os = "linux")]
+        {
+            // 调试：Linux 上建完窗立即显示，绕开前端 show 事件链。
+            if let Err(e) = window.show() {
+                tracing::warn!(%e, "linux immediate show failed");
+            }
+            tracing::info!(view = label, visible = window.is_visible().unwrap_or(false), "after linux show");
+        }
         #[cfg(windows)]
         if view == View::Main {
             crate::local_drop_windows::attach(&window)?;
