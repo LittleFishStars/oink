@@ -2,11 +2,14 @@
 # Oink Linux 开发/运行启动器：先起后台服务，等 IPC 就绪，再起图形界面。
 #
 # 用法：
-#   scripts/linux-run.sh            # debug 构建
-#   scripts/linux-run.sh release    # release 构建
+#   scripts/linux-run.sh            # debug 构建 + vite 开发服务器（热更新）
+#   scripts/linux-run.sh release    # release 构建（前端已嵌入，无需 vite）
 #   OINK_HOME=~/test-home scripts/linux-run.sh   # 隔离数据目录测试
 #
-# 前提：前端已构建（apps/oink/dist 存在；没有就先跑 `pnpm build`）。
+# 说明：debug 构建的 Tauri 从 http://localhost:1440 加载前端（devUrl），
+# 必须有 vite 开发服务器，否则界面显示 "Could not connect to localhost"。
+# release 构建需先在 apps/oink 下 `pnpm build`，并用
+# `cargo build --release -p oink-ui --features custom-protocol` 嵌入前端。
 # Ctrl-C 退出 UI 后，后台仍在运行：用 `oink-agent stop` 或 pkill -f 'oink-agent run' 收尾。
 set -euo pipefail
 
@@ -43,4 +46,23 @@ for _ in $(seq 1 100); do
 done
 
 # UI 前台运行（Ctrl-C 退出界面；后台继续常驻，重开界面无需重启后台）。
+VITE_PID=""
+cleanup() {
+  [ -n "$VITE_PID" ] && kill "$VITE_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+if [ "$PROFILE" = debug ]; then
+  # debug 构建需要 vite dev 服务器（Tauri devUrl=http://localhost:1440）。
+  if ! curl -sf http://localhost:1440 >/dev/null 2>&1; then
+    echo "启动 vite 开发服务器（1440）…"
+    (cd apps/oink && nohup pnpm dev >> "$DATA_DIR/vite.log" 2>&1) &
+    VITE_PID=$!
+    for _ in $(seq 1 100); do
+      curl -sf http://localhost:1440 >/dev/null 2>&1 && break
+      sleep 0.2
+    done
+  fi
+fi
+
 exec "$BIN/oink"
