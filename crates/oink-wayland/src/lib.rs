@@ -92,7 +92,7 @@ pub struct Globals {
 }
 
 pub type Shared = Arc<State>;
-pub(crate) struct Client;
+pub struct Client;
 
 impl Dispatch<wl_registry::WlRegistry, Shared> for Client {
     fn event(
