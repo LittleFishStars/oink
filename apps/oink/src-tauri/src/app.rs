@@ -288,7 +288,7 @@ pub fn run() {
                 return;
             }
             if let Err(error) = remote.hello() {
-                tracing::error!(%error, "backend unavailable");
+                tracing::error!(error = ?error, "backend unavailable");
                 return;
             }
         }

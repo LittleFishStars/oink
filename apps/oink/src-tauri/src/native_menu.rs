@@ -2,7 +2,7 @@
 use oink_agent::config::UiLanguage;
 use tauri::AppHandle;
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 #[derive(serde::Deserialize)]
 struct MenuLabels {
     about: String,
@@ -20,7 +20,7 @@ struct MenuLabels {
     close_window: String,
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MenuCatalog {
@@ -31,7 +31,7 @@ struct MenuCatalog {
     ko: MenuLabels,
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn catalog() -> &'static MenuCatalog {
     static CATALOG: std::sync::OnceLock<MenuCatalog> = std::sync::OnceLock::new();
     CATALOG.get_or_init(|| {
@@ -39,7 +39,7 @@ fn catalog() -> &'static MenuCatalog {
     })
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn labels(language: UiLanguage) -> &'static MenuLabels {
     let catalog = catalog();
     match language {

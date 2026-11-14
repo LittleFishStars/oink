@@ -14,7 +14,7 @@ pub enum ShellError {
     LogLevelUnavailable,
     #[cfg(target_os = "macos")]
     StatusIconOwnedByBackend,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     StatusIconUnavailable,
 }
 
@@ -40,7 +40,7 @@ pub async fn read_attribution(app: AppHandle, path: String) -> Result<String, Sh
             .ok_or(ShellError::AttributionUnavailable)?
             .join("Resources")
     };
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     let root = app
         .path()
         .resource_dir()
@@ -134,7 +134,7 @@ pub fn shell_set_log_level(level: String) -> Result<(), ShellError> {
 /// backend immediately after its authoritative native preference is committed.
 #[tauri::command]
 pub fn shell_set_status_icon(app: AppHandle, visible: bool) -> Result<(), ShellError> {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     {
         let tray = app.tray_by_id("main").ok_or(ShellError::StatusIconUnavailable)?;
         tray.set_visible(visible).map_err(|_| ShellError::StatusIconUnavailable)

@@ -3,8 +3,29 @@
 
 #[cfg(windows)]
 pub use platform::taskbar_dark;
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 pub use platform::{system_dark, watch_system_theme};
+
+/// Linux：暂无跨桌面的主题变化监听；读取 gsettings（GNOME 系）作一次性快照，
+/// 失败按浅色处理。watch 回调立即投递当前值，不持续监听。
+#[cfg(target_os = "linux")]
+mod platform {
+    /// 颜色方案快照；gsettings 不可用或非 GNOME 系时按浅色。
+    pub fn system_dark() -> bool {
+        std::process::Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("dark"))
+            .unwrap_or(false)
+    }
+
+    /// 立即投递一次当前值；Linux 上没有持续的主题变化通知可依赖。
+    pub fn watch_system_theme(changed: impl Fn(bool) + Send + Sync + 'static) {
+        changed(system_dark());
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod platform {

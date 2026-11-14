@@ -19,7 +19,7 @@ impl Appearance {
 
 #[derive(Clone, Copy)]
 pub(crate) enum Artwork {
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(target_os = "macos", target_os = "linux", test))]
     Mac,
     #[cfg(any(windows, test))]
     Windows,
@@ -27,7 +27,7 @@ pub(crate) enum Artwork {
 
 pub(crate) fn render(artwork: Artwork, appearance: Appearance, size: u32) -> Result<tiny_skia::Pixmap, String> {
     let source = match artwork {
-        #[cfg(any(target_os = "macos", test))]
+        #[cfg(any(target_os = "macos", target_os = "linux", test))]
         Artwork::Mac => include_str!("../icons/appicon-macos.svg"),
         #[cfg(any(windows, test))]
         Artwork::Windows => include_str!("../icons/appicon-windows.svg"),

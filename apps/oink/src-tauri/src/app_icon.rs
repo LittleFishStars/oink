@@ -57,7 +57,7 @@ pub(crate) fn initialize(app: &AppHandle) {
             Err(error) => tracing::warn!(%error, "initial tray state unavailable"),
         }
     }
-    #[cfg(any(target_os = "macos", windows))]
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
         let watched = app.clone();
         oink_agent::appearance::watch_system_theme(move |dark| {

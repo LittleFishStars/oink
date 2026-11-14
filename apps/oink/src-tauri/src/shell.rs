@@ -64,7 +64,7 @@ fn enqueue(app: &AppHandle, request: WindowRequest) {
                 WindowRequest::Normal(view, _, reply) => (*view, reply.take()),
                 WindowRequest::Panel(_) => (View::Panel, None),
             };
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             let result = execute_request(&handle, request);
             #[cfg(target_os = "macos")]
             let result = {
@@ -232,9 +232,10 @@ fn create_or_close_panel(app: &AppHandle, anchor: PanelAnchor) -> tauri::Result<
                 let _ = window;
                 crate::panel_macos::prepare(&handle, rect, anchor)
             }
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             {
                 let _ = handle;
+                #[cfg(windows)]
                 crate::cursor_dispatch_windows::prepare(&window)?;
                 window.set_position(tauri::PhysicalPosition::new(rect.x, rect.y))?;
                 window.set_size(tauri::PhysicalSize::new(rect.width, rect.height))?;
@@ -502,6 +503,17 @@ fn show_windows(window: &tauri::WebviewWindow, activation: Activation) -> tauri:
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     }
+    if activation == Activation::User {
+        focus_window(window)?;
+    }
+    Ok(())
+}
+
+/// Linux/Wayland：窗口直接显示；焦点策略由合成器裁决，set_focus 被拒绝时窗口
+/// 仍可从任务栏/托盘打开，不做任何合成输入的回退。
+#[cfg(target_os = "linux")]
+fn show_windows(window: &tauri::WebviewWindow, activation: Activation) -> tauri::Result<()> {
+    window.show()?;
     if activation == Activation::User {
         focus_window(window)?;
     }

@@ -1,6 +1,17 @@
 //! Read the user's UI language independently of the embedded browser profile.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 use oink_agent::config::UiLanguage;
+
+#[cfg(target_os = "linux")]
+pub fn preferred_languages() -> Vec<String> {
+    // LC_ALL > LC_MESSAGES > LANG，与 libc 惯例一致；形如 zh_CN.UTF-8。
+    let raw = std::env::var("LC_ALL")
+        .or_else(|_| std::env::var("LC_MESSAGES"))
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_default();
+    let lang = raw.split('.').next().unwrap_or("").trim().to_string();
+    if lang.is_empty() { Vec::new() } else { vec![lang] }
+}
 
 #[cfg(target_os = "macos")]
 pub fn preferred_languages() -> Vec<String> {
@@ -47,7 +58,7 @@ pub fn preferred_languages() -> Vec<String> {
     })
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 pub fn auto_language() -> UiLanguage {
     UiLanguage::Auto.resolve(preferred_languages().first().map(String::as_str).unwrap_or(""))
 }
