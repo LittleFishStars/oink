@@ -64,8 +64,15 @@ fn enqueue(app: &AppHandle, request: WindowRequest) {
                 WindowRequest::Normal(view, _, reply) => (*view, reply.take()),
                 WindowRequest::Panel(_) => (View::Panel, None),
             };
-            #[cfg(any(windows, target_os = "linux"))]
+            #[cfg(windows)]
             let result = execute_request(&handle, request);
+            // GTK 要求窗口操作在主线程（同 macOS）；非主线程创建的窗口
+            // 对象能建立但永远不会映射到合成器。
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            let result = {
+                let request_handle = handle.clone();
+                on_ui(&handle, move || execute_request(&request_handle, request))
+            };
             #[cfg(target_os = "macos")]
             let result = {
                 let request_handle = handle.clone();
