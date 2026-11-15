@@ -624,6 +624,10 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .tooltip("Oink")
         .show_menu_on_left_click(false)
         .build(app)?;
+    // Linux 上 build 成功 = 已向 StatusNotifier 总线注册条目；图标是否「可见」
+    // 还取决于桌面面板是否提供 StatusNotifierWatcher（waybar/noctalia 的 tray 模块）。
+    #[cfg(target_os = "linux")]
+    tracing::info!("tray icon registered via libayatana-appindicator");
     #[cfg(windows)]
     crate::tray_windows::install(app)?;
     crate::app_icon::tray_created(app);
