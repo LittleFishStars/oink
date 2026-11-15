@@ -621,6 +621,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let icon = crate::app_icon::tray_image(app).map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
     TrayIconBuilder::with_id("main")
         .icon(icon)
+        .title("Oink")
         .tooltip("Oink")
         .show_menu_on_left_click(false)
         .build(app)?;

@@ -19,7 +19,7 @@ echo "  input 组: $(id -Gn | tr ' ' '\n' | grep -qx input && echo ✓ 在 || ec
 ls /dev/input/event* >/dev/null 2>&1 && echo "  /dev/input/event*: ✓ 可见（$(ls /dev/input/event* | wc -l) 个）" || echo "  /dev/input/event*: ❌ 不可见"
 echo
 echo "════════ 4. 最近一次 agent 日志的关键行 ════════"
-LOG=$(ls -t ~/.local/share/oink/agent.log ~/Projects/.tmp/*/agent.log 2>/dev/null | head -1)
+LOG=$(ls -t ~/.local/share/oink/agent.log ~/.local/share/oink/Logs/*.log 2>/dev/null | head -1)
 if [ -n "${LOG:-}" ]; then
   echo "  （$LOG 的最后 12 行相关内容）"
   grep -E '注入|tray|evdev|backlog|暂停|ERROR|WARN' "$LOG" 2>/dev/null | tail -12 || tail -6 "$LOG"

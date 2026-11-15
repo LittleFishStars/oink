@@ -56,12 +56,12 @@ pub fn ensure_backend(remote: &RemoteApi, data_dir: &Path) -> Result<(), String>
     })?;
     tracing::info!(agent = %binary.display(), "backend not running; starting it");
 
-    let mut command = Command::new(&binary);
-    command.arg("run");
-    // 数据目录经环境传递，保证 UI 与后台看同一个 home（OINK_HOME 已设置时继承）。
-    let mut child = oink_agent::backend::launch::spawn_detached(&mut command)
+    // agent 输出落到数据目录的 agent.log：自动拉起没有终端，落日志才能
+    // 诊断注入延迟（「Wayland 注入存在明显延迟」WARN）与启动失败原因。
+    let log_path = data_dir.join("agent.log");
+    let mut child = spawn_with_log(&binary, &log_path)
         .map_err(|e| format!("failed to start {}: {e}", binary.display()))?;
-    tracing::info!(pid = child.id(), "backend process spawned");
+    tracing::info!(pid = child.id(), log = %log_path.display(), "backend process spawned");
 
     let deadline = Instant::now() + START_TIMEOUT;
     let mut last_error = String::new();
@@ -119,8 +119,7 @@ pub fn ensure_backend(remote: &RemoteApi, data_dir: &Path) -> Result<(), String>
     })
 }
 
-/// 换个 stderr 便于诊断：把 agent 输出落到数据目录的 agent.log。
-#[allow(dead_code)]
+/// 把 agent 输出落到数据目录的 agent.log（自动拉起没有终端，日志是唯一诊断面）。
 pub fn spawn_with_log(binary: &Path, log: &Path) -> std::io::Result<std::process::Child> {
     if let Some(parent) = log.parent() {
         std::fs::create_dir_all(parent)?;
