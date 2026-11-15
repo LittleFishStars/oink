@@ -557,6 +557,23 @@ impl Router {
             (head, target, departed, false)
         };
         if !departed {
+            // 每秒一条：gap 通道接管了这次边缘推进，但 plane 运动未离屏。
+            // 常见原因：目标屏不在 input_ready 的 screens 列表（对端
+            // connected/sharing/focus_ready 不满足）或布局里没有相邻屏。
+            static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let now_us = u64::from(now);
+            let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+            if now_us.saturating_sub(last) >= 1_000_000 {
+                LAST.store(now_us, std::sync::atomic::Ordering::Relaxed);
+                tracing::info!(
+                    target: "oink_gap",
+                    through_zone,
+                    reachable_screens = screens.len(),
+                    head = ?(head.x, head.y),
+                    origin = ?origin,
+                    "gap 未离屏：本次推进没有产生移交目标"
+                );
+            }
             return None;
         }
         if started {
