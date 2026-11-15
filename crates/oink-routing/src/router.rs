@@ -1887,6 +1887,22 @@ impl Router {
         self.local_motion_unconstrained(dx, dy, cursor, now)
     }
     fn local_motion_unconstrained(&mut self, dx: f64, dy: f64, cursor: Option<Point>, now: Micros) -> Disposition {
+        // 每 5 秒一条：验证期确认本机 PointerDelta 真的进了路由，以及
+        // cursor 是否携带（没有 cursor 的移动走不到穿越判定的坐标分支）。
+        static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+        if now.saturating_sub(last) >= 5_000_000 {
+            LAST.store(now, std::sync::atomic::Ordering::Relaxed);
+            tracing::info!(
+                target: "oink_gap",
+                dx, dy, ?cursor,
+                holder_is_me = self.holder == self.me(),
+                mouse_local = self.mouse_local(),
+                game_mode = self.game_mode().active,
+                pointer = ?self.pointer.as_ref().map(|p| (p.screen.display.clone(), p.local.x, p.local.y)),
+                "local_motion 入口状态（验证期，5s 一条）"
+            );
+        }
         if self.mouse_local() {
             if let Some(cursor) = cursor
                 && let Some((key, bounds)) = self.locate(cursor)

@@ -458,6 +458,8 @@ impl Router {
                         gap_travel = self.layout.gap_topology().is_some_and(|t| t.settings().gap_travel),
                         dx = hand.0,
                         dy = hand.1,
+                        pointer_screen = ?from.screen.display,
+                        pointer_local = ?(from.local.x, from.local.y),
                         "gap 拒绝：本机推向边缘但移交前提不满足"
                     );
                 }
