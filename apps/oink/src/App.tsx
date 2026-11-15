@@ -30,7 +30,7 @@ import { CompactIcon } from './arrange/CompactIcon';
 import { nextSelection, type SelectMode } from './arrange/selection';
 import { ScreenPreview } from './arrange/screenPreview';
 import { CreateProfileDialog, ProfileList, ProfileTools } from './arrange/LayoutProfiles';
-import { DesktopWindow } from './window/DesktopWindow';
+import { DesktopWindow , type Platform } from './window/DesktopWindow';
 import { ResizeEdges } from './window/ResizeEdges';
 import { FileProviderDialog, useFileProviderExplainer } from './permissions/FileProviderDialog';
 import { QuitDialog } from './window/QuitDialog';
@@ -77,7 +77,9 @@ export function App() {
     const prefs = usePreferences();
     const view = new URLSearchParams(location.search).get('view') ?? 'main';
     const pairing = usePairing(view === 'main');
-    const platform = state.boot?.platform === 'windows' ? 'win' : 'mac';
+    // boot.platform 原生含 linux；'win' 档 = 非 mac 的窗口/导航形态（Linux 复用）。
+const platform: Platform = state.boot?.platform === 'windows' ? 'win'
+    : state.boot?.platform === 'linux' ? 'linux' : 'mac';
     const [controlTargets,setControlTargets]=useState<ReadonlyMap<string,ControlAction[]>>(()=>new Map());
     const [controls]=useState(()=>new ControlActions({
         read:(device,action)=>controlObservation(agent.get().cards,device,action),

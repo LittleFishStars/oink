@@ -1,3 +1,4 @@
+import type { Platform } from '../window/DesktopWindow';
 import {
     membersOf,
     sameComputer,
@@ -44,7 +45,7 @@ export type ScreenMove =
     | { type: 'end'; id: string; cancelled: false; label: string; compact: boolean };
 export interface ArrangementProps {
     screens: Screen[];
-    platform?: 'mac' | 'win';
+    platform?: Platform;
     /** Complete retained geometry, including hidden members used at release. */
     geometryScreens?: Screen[];
     onProjection?: (screens: Screen[] | null, held?: boolean) => void;

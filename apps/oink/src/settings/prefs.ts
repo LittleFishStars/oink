@@ -10,15 +10,13 @@ export interface KeyMap {
 }
 export const MAC_KEYS: MacKey[] = ['caps', 'shift', 'control', 'option', 'command'];
 export const WIN_KEYS: WinKey[] = ['caps', 'shift', 'ctrl', 'win', 'alt'];
-export const KEY_NAMES: Record<Platform, Record<string, {
-    name: string;
-    sym?: string;
-}>> = {
-    mac: {
+export const KEY_NAMES: Record<Platform, Record<string, { name: string; sym?: string }>> = {
+  mac: {
         control: { name: 'control', sym: '⌃' }, option: { name: 'option', sym: '⌥' }, command: { name: 'command', sym: '⌘' },
         fn: { name: 'Fn', sym: '🌐' }, shift: { name: 'shift', sym: '⇧' }, caps: { name: 'caps lock', sym: '⇪' },
     },
-    win: { ctrl: { name: 'Ctrl' }, win: { name: 'Win' }, alt: { name: 'Alt' }, shift: { name: 'Shift' }, caps: { name: 'Caps Lock' } },
+  win: { ctrl: { name: 'Ctrl' }, win: { name: 'Win' }, alt: { name: 'Alt' }, shift: { name: 'Shift' }, caps: { name: 'Caps Lock' } },
+  linux: { ctrl: { name: 'Ctrl' }, win: { name: 'Win' }, alt: { name: 'Alt' }, shift: { name: 'Shift' }, caps: { name: 'Caps Lock' } },
 };
 export function presetMap(platform: Platform, preset: Exclude<KeyPreset, 'custom'>, capsIme: boolean): KeyMap {
     if (platform === 'mac') {
@@ -76,8 +74,8 @@ export const DEFAULT_PREFS: Prefs = {
     escStop: true,
     language: 'auto',
     keyPreset: 'mac',
-    keyCustom: { mac: presetMap('mac', 'mac', false), win: presetMap('win', 'win', false) },
-    keyCustomTouched: { mac: false, win: false },
+    keyCustom: { mac: presetMap('mac', 'mac', false), win: presetMap('win', 'win', false), linux: presetMap('win', 'win', false) },
+    keyCustomTouched: { mac: false, win: false, linux: false },
     capsSplit: false,
     allowFnMapping: false,
     pollLimit: '125',

@@ -6,7 +6,7 @@ import { Button, Icon, Tooltip, mergeRefs, presets, speed } from 'oink-ui';
 import { useTrafficLightAlignment } from './useTrafficLightAlignment';
 import { OverlayScrollbar } from './OverlayScrollbar';
 import { quietActivationFocus } from './activationFocus';
-export type Platform = 'mac' | 'win';
+export type Platform = 'mac' | 'win' | 'linux';
 export interface WindowState {
     maximized: boolean;
     minimized: boolean;

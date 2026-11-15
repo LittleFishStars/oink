@@ -1,9 +1,10 @@
+import type { Platform } from './DesktopWindow';
 import { inTauri } from '../api/transport';
 
 const directions = ['North', 'NorthEast', 'East', 'SouthEast', 'South', 'SouthWest', 'West', 'NorthWest'] as const;
 
 /** The visible shell sits inside the native window's transparent shadow gutter. */
-export function ResizeEdges({ platform }: { platform: 'mac' | 'win' }) {
+export function ResizeEdges({ platform }: { platform: Platform }) {
   if (!inTauri) return null;
   return <div className="resize-edges" aria-hidden>
     {directions.map(direction => <div key={direction} data-direction={direction} onPointerDown={event => {

@@ -20,6 +20,12 @@ const ROWS: Record<Platform, Cap[][]> = {
         [{ id: 'shift', u: 2.25 }, { u: 1, ghost: 'Z' }, { u: 1, ghost: 'X' }],
         [{ id: 'ctrl', u: 1.25 }, { id: 'win', u: 1 }, { id: 'alt', u: 1 }, { u: 3, ghost: '' }],
     ],
+    // Linux 键盘与 Windows 布局一致（Super/Ctrl/Alt）。
+    linux: [
+        [{ id: 'caps', u: 1.75 }, { u: 1, ghost: 'A' }, { u: 1, ghost: 'S' }, { u: 1, ghost: 'D' }],
+        [{ id: 'shift', u: 2.25 }, { u: 1, ghost: 'Z' }, { u: 1, ghost: 'X' }],
+        [{ id: 'ctrl', u: 1.25 }, { id: 'win', u: 1 }, { id: 'alt', u: 1 }, { u: 3, ghost: '' }],
+    ],
 };
 const targetName = (platform: Platform, t: string) => {
     if (t === 'none') return tr('mapping|无');
