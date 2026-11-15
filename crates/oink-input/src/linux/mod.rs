@@ -127,13 +127,18 @@ impl InputBackend for LinuxInput {
         let (tx, rx) = std::sync::mpsc::channel::<oink_foundation::input::CapturedEvent>();
         let control = inner.capture.control.clone();
         let can_capture = !inner.devices.is_empty();
+        // start_loop 返回前必须同步安装 wake：InputThread::send 在启动序列里
+        // 会立即 wake()()（OnceLock::get().expect），异步安装会留下竞态
+        // （release 构建的调度差异让 observers 抢先于捕获线程）。
+        {
+            let wake_thread = std::thread::current();
+            let wake_thread2 = wake_thread.clone();
+            owner.set_wake(Arc::new(move || wake_thread2.unpark()));
+            owner.capture_available(can_capture);
+        }
         let owner_thread = std::thread::Builder::new()
             .name("oink-linux-input".into())
             .spawn(move || {
-                let wake_thread = std::thread::current();
-                let wake_thread2 = wake_thread.clone();
-                owner.set_wake(Arc::new(move || wake_thread2.unpark()));
-                owner.capture_available(can_capture);
                 while !control.stop.load(Ordering::Acquire) {
                     // 设备线程的事件串行喂给 owner（CaptureLoop 要求单线程调用）。
                     while let Ok(event) = rx.try_recv() {

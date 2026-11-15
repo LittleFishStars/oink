@@ -376,14 +376,6 @@ fn create_normal(app: &AppHandle, view: View) -> tauri::Result<()> {
             decorated = window.is_decorated().unwrap_or(false),
             "product window built"
         );
-        #[cfg(target_os = "linux")]
-        {
-            // 调试：Linux 上建完窗立即显示，绕开前端 show 事件链。
-            if let Err(e) = window.show() {
-                tracing::warn!(%e, "linux immediate show failed");
-            }
-            tracing::info!(view = label, visible = window.is_visible().unwrap_or(false), "after linux show");
-        }
         #[cfg(windows)]
         if view == View::Main {
             crate::local_drop_windows::attach(&window)?;
@@ -403,7 +395,10 @@ fn create_normal(app: &AppHandle, view: View) -> tauri::Result<()> {
         tracing::info!(view = label, "product window prepared");
         #[cfg(windows)]
         return finish_normal_windows(app, window, created, created && view == View::Main);
-        #[cfg(target_os = "macos")]
+        // macOS 与 Linux 都在创建后立即揭示：GTK/WebKitGTK 的窗口必须先映射
+        // 才会渲染首帧（与 WKWebView 相反——隐藏等待 DOM-ready 会死锁：
+        // 前端等显示、显示等前端首帧）。React 的初始 DOM/主题在映射后绘制。
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             let reveal = {
                 let shell = app.state::<Shell>();
