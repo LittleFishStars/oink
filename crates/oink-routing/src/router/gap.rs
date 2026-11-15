@@ -441,6 +441,27 @@ impl Router {
     ) -> Option<Disposition> {
         self.gap_sync();
         if !self.gap_allowed() || !hand.0.is_finite() || !hand.1.is_finite() {
+            // 每秒最多一条：源机推边缘却无法移交时，直接说出是哪个前提不满足，
+            // 让 agent.log 一眼定位（gap_travel 未生效 / 焦点归属 / 按钮按住）。
+            if !self.gap_allowed() {
+                static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let now_us = u64::from(now);
+                let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+                if now_us.saturating_sub(last) >= 1_000_000 {
+                    LAST.store(now_us, std::sync::atomic::Ordering::Relaxed);
+                    tracing::info!(
+                        target: "oink_gap",
+                        holder_is_me = self.holder == self.me(),
+                        leave_blocked = self.leave_blocked(),
+                        buttons_held = self.pointer_buttons_held(),
+                        dnd = self.dnd_state_name(),
+                        gap_travel = self.layout.gap_topology().is_some_and(|t| t.settings().gap_travel),
+                        dx = hand.0,
+                        dy = hand.1,
+                        "gap 拒绝：本机推向边缘但移交前提不满足"
+                    );
+                }
+            }
             return None;
         }
         let t = self.layout.gap_topology().unwrap();
@@ -481,6 +502,21 @@ impl Router {
                 })
                 .and_then(|exit| {
                     let target = t.screen(&exit.to.screen)?.placement.clone();
+                    if !self.input_ready(target.id.device) {
+                        static LAST_READY: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        let now_us = u64::from(now);
+                        let last = LAST_READY.load(std::sync::atomic::Ordering::Relaxed);
+                        if now_us.saturating_sub(last) >= 1_000_000 {
+                            LAST_READY.store(now_us, std::sync::atomic::Ordering::Relaxed);
+                            tracing::info!(
+                                target: "oink_gap",
+                                peer = ?target.id.device,
+                                portal_side = ?exit.side,
+                                "gap 拒绝：目标对端未就绪（connected/sharing/focus_ready）"
+                            );
+                        }
+                    }
                     self.input_ready(target.id.device).then(|| ZoneTravel {
                         entry: target.local_to_plane(exit.to.local),
                         target,
