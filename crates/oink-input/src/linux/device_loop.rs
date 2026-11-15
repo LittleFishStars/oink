@@ -57,12 +57,9 @@ pub fn device_thread(
             grabbed = remote;
         }
 
-        if !remote {
-            // Local：不读、不上报；合成器照常处理物理输入。
-            std::thread::sleep(Duration::from_millis(20));
-            continue;
-        }
-
+        // Local 也要持续读取：路由层需要物理事件做屏幕边缘穿越判定
+        // （源机把鼠标推向另一台设备的方向时移交焦点）。事件不 grab、
+        // 合成器照常处理，捕获层只观察。Remote 才 grab 并真正接管。
         let events = match device.fetch_events() {
             Ok(it) => it.collect::<Vec<_>>(),
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -75,6 +72,7 @@ pub fn device_thread(
             }
         };
 
+        let remote_now = remote;
         let speed = match kind {
             DeviceKind::Mouse => speed_of(&control.mouse_speed),
             DeviceKind::Touchpad => speed_of(&control.touchpad_speed),
@@ -85,7 +83,7 @@ pub fn device_thread(
 
         for ev in events {
             match ev.event_type() {
-                evdev::EventType::KEY => {
+                evdev::EventType::KEY if remote_now => {
                     let code = ev.code();
                     let pressed = ev.value() == 1; // 0=抬起 1=按下 2=自动重复
                     if let Some(button) = button_from_evdev(code) {
@@ -94,6 +92,7 @@ pub fn device_thread(
                         frame.push(InputEvent::Key { code: key, pressed });
                     }
                 }
+                evdev::EventType::KEY => {}
                 evdev::EventType::RELATIVE => {
                     let value = f64::from(ev.value());
                     match rel_axis_from_evdev(ev.code()) {
@@ -110,11 +109,15 @@ pub fn device_thread(
                     // 一帧结束：位移与滚轮一次性上报。
                     if asm.dx != 0.0 || asm.dy != 0.0 {
                         let pos = ledger.advance(asm.dx, asm.dy);
-                        frame.push(InputEvent::PointerDelta { dx: asm.dx, dy: asm.dy });
+                        // Local 模式只上报位移（供路由做边缘穿越判定）；
+                        // 按钮/键盘不上报，避免本机按下被误吞或重复注入。
+                        if remote_now {
+                            frame.push(InputEvent::PointerDelta { dx: asm.dx, dy: asm.dy });
+                        }
                         frame.push(InputEvent::RawPointerDelta { dx: asm.dx, dy: asm.dy });
                         let _ = pos; // 光标由 ledger 维护
                     }
-                    if asm.wheel != 0.0 || asm.hwheel != 0.0 {
+                    if remote_now && (asm.wheel != 0.0 || asm.hwheel != 0.0) {
                         frame.push(InputEvent::Scroll {
                             dx: -asm.hwheel,
                             dy: scroll_dy(asm.wheel, natural),

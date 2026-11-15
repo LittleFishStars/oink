@@ -106,27 +106,35 @@ impl PointerInjector {
     }
 
     /// 绝对移动到全局逻辑坐标 (x, y)。找到包含该点的输出；不在任何屏内时钳到外接矩形。
+    ///
+    /// 热路径（125Hz 持续调用）：输出选择结果缓存在指针条目里，仅当
+    /// 输出代数变化（插拔/改布局）时才重建；这里只做两次无竞争的
+    /// Mutex 短锁与一次 Wayland 写入，不碰输出枚举。
     pub fn move_to(&self, x: f64, y: f64) {
         self.ensure_pointers();
-        let outs = self.wl.outputs();
-        // 选包含该点的输出；没有（边界/外溢）则选最近输出并钳位。
-        let Some(target) = outs.iter().find(|o| o.contains(x, y)).or_else(|| {
-            outs.iter().min_by(|a, b| {
-                dist2(a, x, y).partial_cmp(&dist2(b, x, y)).unwrap_or(std::cmp::Ordering::Equal)
-            })
-        }) else {
-            return;
-        };
-        let lx = x.clamp(target.x as f64, (target.x + target.width - 1) as f64);
-        let ly = y.clamp(target.y as f64, (target.y + target.height - 1) as f64);
         let held = self.pointers.lock().unwrap();
-        let Some(p) = held.iter().find(|p| p.output_id == target.id) else {
-            return;
+        // 选包含该点的输出；没有（边界/外溢）则选最近输出并钳位。
+        let pick = held.iter().position(|p| {
+            x >= p.x && y >= p.y && x < p.x + p.width && y < p.y + p.height
+        });
+        let index = match pick {
+            Some(i) => i,
+            None => {
+                // 不在任何屏内：按到各输出中心的距离取最近。
+                let (best, _) = held.iter().enumerate().min_by(|(_, a), (_, b)| {
+                    dist2_hint(a, x, y).partial_cmp(&dist2_hint(b, x, y)).unwrap_or(std::cmp::Ordering::Equal)
+                }).map(|(i, p)| (i, p)).unwrap_or((0, &held[0]));
+                best
+            }
         };
+        let Some(p) = held.get(index) else { return };
+        let lx = x.clamp(p.x, p.x + p.width - 1.0);
+        let ly = y.clamp(p.y, p.y + p.height - 1.0);
         let t = stamp();
-        p.pointer.motion_absolute(t, (lx - target.x as f64) as u32, (ly - target.y as f64) as u32, target.width as u32, target.height as u32);
+        p.pointer.motion_absolute(t, (lx - p.x) as u32, (ly - p.y) as u32, p.width as u32, p.height as u32);
         p.pointer.frame();
         self.wl.conn().flush().ok();
+        drop(held);
         *self.last.lock().unwrap() = Some((lx, ly));
     }
 
@@ -138,10 +146,9 @@ impl PointerInjector {
         // 取包含上次位置的指针，否则第一块。
         let last = *self.last.lock().unwrap();
         let index = last
-            .and_then(|(x, y)| held.iter().position(|p| (x - p.x) >= 0. && (y - p.y) >= 0. && (x - p.x) < p.width && (y - p.y) < p.height))
-            .or_else(|| held.iter().position(|p| last.is_some_and(|(x, y)| {
+            .and_then(|(x, y)| held.iter().position(|p| {
                 x >= p.x && y >= p.y && x < p.x + p.width && y < p.y + p.height
-            })))
+            }))
             .unwrap_or(0);
         let Some(p) = held.get_mut(index) else { return };
         let t = stamp();
@@ -208,6 +215,12 @@ impl PointerInjector {
     pub fn cursor(&self) -> Option<(f64, f64)> {
         *self.last.lock().unwrap()
     }
+}
+
+fn dist2_hint(o: &OutputPointer, x: f64, y: f64) -> f64 {
+    let cx = o.x + o.width / 2.0;
+    let cy = o.y + o.height / 2.0;
+    (x - cx) * (x - cx) + (y - cy) * (y - cy)
 }
 
 fn dist2(o: &crate::OutputInfo, x: f64, y: f64) -> f64 {
