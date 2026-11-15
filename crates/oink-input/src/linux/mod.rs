@@ -164,7 +164,26 @@ impl InputBackend for LinuxInput {
                     }
                     if last_scan.elapsed() >= Duration::from_secs(2) {
                         last_scan = Instant::now();
-                        for (path, kind) in capture::discover_devices(Path::new("/dev/input")) {
+                        let found = capture::discover_devices(Path::new("/dev/input"));
+                        // 心跳：证明扫描在跑 + 报告当前可见设备数（蓝牙鼠标
+                        // 休眠时节点消失，重连后这里必须能看到它）。
+                        static LAST_BEAT: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| u64::try_from(d.as_millis()).unwrap_or(0))
+                            .unwrap_or(0);
+                        let last_beat = LAST_BEAT.load(std::sync::atomic::Ordering::Relaxed);
+                        if now_ms.saturating_sub(last_beat) >= 30_000 {
+                            LAST_BEAT.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+                            tracing::info!(
+                                target: "oink_gap",
+                                visible = found.len(),
+                                known = known.len(),
+                                "evdev 热插拔扫描心跳（30s 一条）"
+                            );
+                        }
+                        for (path, kind) in found {
                             if known.insert(path.clone()) {
                                 tracing::info!(
                                     target: "oink_gap",
