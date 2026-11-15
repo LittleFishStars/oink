@@ -24,6 +24,19 @@ LICENSE = 'GPL-3.0-only'
 BINARIES = ('oink', 'oink-agent', 'oink-crash-collector')
 
 # WebKitGTK 等 Tauri 运行时依赖由各格式自行声明；这里只列产品自带的资源。
+SYSTEMD_UNIT = """[Unit]
+Description=Oink (software KVM)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/oink-agent run
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
+"""
+
 DESKTOP_FILE = f"""[Desktop Entry]
 Type=Application
 Name={PRODUCT}

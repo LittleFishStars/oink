@@ -1,0 +1,48 @@
+# Maintainer: Oink contributors
+# 从本地已编译的 release 二进制构建 pacman 包（.pkg.tar.zst）：
+#   cd packaging/archlinux && OINK_BINARIES=<repo>/target/release makepkg -f
+# 也可供 AUR 使用：把 source=() 换成官方 release 的 tar.gz 并填 sha256sums。
+
+pkgname=oink
+pkgver=0.3.2
+pkgrel=1
+pkgdesc="Software KVM: share keyboard, mouse and clipboard between computers"
+arch=('x86_64')
+url="https://github.com/oinkvm/oink"
+license=('GPL-3.0-only')
+depends=(
+  'glibc'
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libayatana-appindicator'
+  'openssl'
+)
+optdepends=(
+  'xdg-desktop-portal: 文件选择与屏幕共享集成'
+  'wl-clipboard: 命令行剪贴板互操作'
+)
+provides=('oink')
+conflicts=('oink-git' 'oink-bin')
+options=('!strip' '!debug')   # 上游二进制已 strip；LTO 产物再 strip 无收益且破坏调试符号
+source=()
+sha256sums=()
+install=oink.install
+
+package() {
+  # makepkg 在 $srcdir 下执行 package()；本 PKGBUILD 的资源与 PKGBUILD 同目录。
+  local src="$startdir"
+  if [[ -z "${OINK_BINARIES:-}" ]]; then
+    error "请设置 OINK_BINARIES 指向含 oink / oink-agent / oink-crash-collector 的目录"
+    exit 1
+  fi
+  install -Dm755 "$OINK_BINARIES/oink" "$pkgdir/usr/bin/oink"
+  install -Dm755 "$OINK_BINARIES/oink-agent" "$pkgdir/usr/bin/oink-agent"
+  install -Dm755 "$OINK_BINARIES/oink-crash-collector" "$pkgdir/usr/bin/oink-crash-collector"
+
+  install -Dm644 "$src/oink.desktop" "$pkgdir/usr/share/applications/oink.desktop"
+  install -Dm644 "$src/oink.service" "$pkgdir/usr/lib/systemd/user/oink.service"
+  for size in 32 128 256; do
+    install -Dm644 "$src/icon-${size}.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/oink.png"
+  done
+  install -Dm644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

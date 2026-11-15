@@ -16,10 +16,14 @@ rm -rf "$OUT"
 mkdir -p "$OUT"/{appimage,archlinux,debian}
 TREE_SHA=$(printf 'local-dev' | sha256sum | cut -d' ' -f1)
 
-echo "=== 1/3 tar.gz（archlinux） ==="
-python3 packaging/archlinux/build.py --binaries "$BIN" --output "$OUT/archlinux" \
-  --build 1 --source-tree-sha256 "$TREE_SHA"
-tar tzf "$OUT"/archlinux/*.tar.gz | head -12
+echo "=== 1/3 pacman（archlinux） ==="
+if command -v makepkg >/dev/null 2>&1; then
+  python3 packaging/archlinux/build.py --binaries "$BIN" --output "$OUT/archlinux" \
+    --build 1 --source-tree-sha256 "$TREE_SHA"
+  bsdtar -xOf "$OUT"/archlinux/*.pkg.tar.zst .PKGINFO | head -8
+else
+  echo "跳过：无 makepkg（pacman -S --needed base-devel）"
+fi
 
 echo "=== 2/3 .deb（debian） ==="
 if command -v dpkg-deb >/dev/null 2>&1; then
@@ -41,4 +45,4 @@ fi
 
 echo
 echo "产物目录：$OUT"
-find "$OUT" -maxdepth 2 -name '*.tar.gz' -o -maxdepth 2 -name '*.deb' -o -maxdepth 2 -name '*.AppImage' | sort
+find "$OUT" -maxdepth 2 \( -name '*.pkg.tar.zst' -o -name '*.deb' -o -name '*.AppImage' \) | sort

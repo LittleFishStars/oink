@@ -1,0 +1,24 @@
+post_install() {
+  cat <<'EOF'
+==> Oink 已安装。
+    后台服务：systemctl --user enable --now oink
+    图形界面：oink  （或从应用菜单启动）
+    当源机（用本机键鼠控制其他设备）需把用户加入 input 组：
+        sudo usermod -aG input "$USER"   # 重新登录后生效
+EOF
+}
+
+post_upgrade() {
+  post_install
+}
+
+pre_remove() {
+  # 卸载前停掉用户服务；可能本来没启用，失败不阻断。
+  systemctl --user stop oink 2>/dev/null || true
+}
+
+post_remove() {
+  cat <<'EOF'
+==> Oink 已移除。用户数据保留在 ~/.local/share/oink（如需彻底清理可手动删除）。
+EOF
+}

@@ -16,21 +16,8 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'linux'))
-from common import BINARIES, DESCRIPTION, HOMEPAGE, LICENSE, UNIX_NAME, VERSION, build_record, icon_png, write_desktop
-
-# 与 tar.gz 相同的 unit 与 README 内容在安装后由 postinst 启用说明补充。
-SYSTEMD_UNIT = """[Unit]
-Description=Oink (software KVM)
-After=graphical-session.target
-PartOf=graphical-session.target
-
-[Service]
-ExecStart=/usr/bin/oink-agent run
-Restart=on-failure
-
-[Install]
-WantedBy=graphical-session.target
-"""
+from common import (BINARIES, DESCRIPTION, HOMEPAGE, LICENSE, SYSTEMD_UNIT, UNIX_NAME, VERSION,
+                    build_record, icon_png, write_desktop)
 
 # WebKitGTK 运行时是 Tauri UI 的硬依赖；libayatana-appindicator3-1 提供托盘。
 DEPENDS = 'libc6 (>= 2.31), libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, libssl3'
