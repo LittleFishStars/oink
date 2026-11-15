@@ -142,6 +142,11 @@ pub struct PointerLedger {
     pub epoch: Instant,
     /// 待定的滚动累积（HiRes 轴需要凑整格）。
     pub wheel: Arc<Mutex<WheelAccum>>,
+    /// 输出外接矩形 (x0, y0, x1, y1)，逻辑像素。真实光标被合成器钳在这个
+    /// 矩形里；虚拟账本必须同样钳位——否则推向边缘时账本越界，路由
+    /// `locate(cursor)` 找不到屏幕，边缘压力与穿越移交永远不触发。
+    /// 0..0 表示未知（不钳位）。
+    pub bounds: Arc<Mutex<(f64, f64, f64, f64)>>,
 }
 
 #[derive(Default)]
@@ -158,6 +163,20 @@ impl PointerLedger {
             park: Arc::new(Mutex::new(None)),
             epoch: Instant::now(),
             wheel: Arc::new(Mutex::new(WheelAccum::default())),
+            bounds: Arc::new(Mutex::new((0., 0., 0., 0.))),
+        }
+    }
+
+    pub fn set_bounds(&self, x0: f64, y0: f64, x1: f64, y1: f64) {
+        *self.bounds.lock().unwrap() = (x0, y0, x1, y1);
+    }
+
+    fn clamp(&self, p: Point) -> Point {
+        let (x0, y0, x1, y1) = *self.bounds.lock().unwrap();
+        if x1 > x0 && y1 > y0 {
+            Point::new(p.x.clamp(x0, x1 - 1.), p.y.clamp(y0, y1 - 1.))
+        } else {
+            p
         }
     }
 
@@ -165,12 +184,14 @@ impl PointerLedger {
         at.duration_since(self.epoch).as_micros() as u64
     }
 
-    /// 移动虚拟光标并返回新位置。
+    /// 移动虚拟光标并返回新位置（钳到输出外接矩形，与真实光标一致）。
     pub fn advance(&self, dx: f64, dy: f64) -> Point {
         let mut cursor = self.cursor.lock().unwrap();
         cursor.x += dx;
         cursor.y += dy;
-        *cursor
+        let clamped = self.clamp(*cursor);
+        *cursor = clamped;
+        clamped
     }
 
     pub fn position(&self) -> Point {
@@ -178,7 +199,8 @@ impl PointerLedger {
     }
 
     pub fn place(&self, at: Point) {
-        *self.cursor.lock().unwrap() = at;
+        let clamped = self.clamp(at);
+        *self.cursor.lock().unwrap() = clamped;
     }
 }
 
@@ -300,6 +322,23 @@ mod tests {
         assert_eq!(ledger.position(), p);
         ledger.place(Point::new(5., 5.));
         assert_eq!(ledger.position().x, 5.);
+    }
+
+    #[test]
+    fn pointer_ledger_clamps_like_the_real_cursor() {
+        let ledger = PointerLedger::new(Point::new(100., 100.));
+        ledger.set_bounds(0., 0., 2080., 1386.);
+        // 持续推向右侧边缘：越推越贴边，绝不越界（路由靠留在边缘的
+        // cursor 做 locate + gap 压力判定）。
+        let mut p = Point::new(100., 100.);
+        for _ in 0..1000 {
+            p = ledger.advance(50., 0.);
+        }
+        assert_eq!(p.x, 2079.);
+        assert_eq!(ledger.position(), p);
+        ledger.place(Point::new(99999., 99999.));
+        assert_eq!(ledger.position().x, 2079.);
+        assert_eq!(ledger.position().y, 1385.);
     }
 
     #[test]

@@ -89,6 +89,9 @@ impl LinuxInput {
             set_speed(&control.touchpad_speed, 1.0);
             control.natural_touchpad.store(natural_touchpad(), Ordering::Relaxed);
             let ledger = PointerLedger::new(cursor);
+            if let Some((x0, y0, x1, y1)) = self.wayland.global_bounds() {
+                ledger.set_bounds(x0 as f64, y0 as f64, x1 as f64, y1 as f64);
+            }
             let grabbed = Arc::new(AtomicBool::new(false));
             let devices = discover_devices(Path::new("/dev/input"));
             (ledger, control, grabbed, devices)
@@ -203,6 +206,10 @@ impl InputBackend for LinuxInput {
 
     fn set_mode(&self, mode: CaptureMode) -> Result<(), InputError> {
         let inner = self.inner()?;
+        // 刷新外接矩形（插拔/改分辨率后）：虚拟光标钳位与真实光标一致。
+        if let Some((x0, y0, x1, y1)) = self.wayland.global_bounds() {
+            inner.capture.ledger.set_bounds(x0 as f64, y0 as f64, x1 as f64, y1 as f64);
+        }
         let remote = matches!(mode, CaptureMode::Remote { .. });
         inner.capture.control.remote.store(remote, Ordering::Release);
         if let CaptureMode::Remote { park } = mode {
