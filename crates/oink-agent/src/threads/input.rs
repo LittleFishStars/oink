@@ -522,6 +522,10 @@ impl InputThread {
         sample.jitter = self.shared.jitter.take();
         sample
     }
+    /// DnD 原生后端安装成功：转达给注入 backend（fences 契约自此生效）。
+    pub(crate) fn notify_dnd_native_available(&self) {
+        self.backend.mark_dnd_native_available();
+    }
     pub fn injection_scheduler_status(&self) -> Arc<oink_network::link::SchedulerStatus> {
         self.inject_scheduler.load()
     }

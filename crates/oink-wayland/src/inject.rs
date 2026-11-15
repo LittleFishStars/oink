@@ -408,6 +408,8 @@ impl wayland_client::Dispatch<ZwpVirtualKeyboardV1, ()> for Client {
 pub struct Injectors {
     pub pointer: PointerInjector,
     pub keyboard: KeyboardInjector,
+    /// DnD 原生后端可用性（oink-agent 安装 dnd 后端后置位）。
+    pub dnd_native_available: std::sync::atomic::AtomicBool,
 }
 
 impl Injectors {
@@ -415,6 +417,7 @@ impl Injectors {
         Ok(Self {
             pointer: PointerInjector::new(wl.clone())?,
             keyboard: KeyboardInjector::new(wl)?,
+            dnd_native_available: std::sync::atomic::AtomicBool::new(false),
         })
     }
 }

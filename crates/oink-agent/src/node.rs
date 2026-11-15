@@ -508,8 +508,15 @@ impl Node {
         if let Some(handle) = self.inner.dnd.get() {
             match oink_clipboard::dnd::platform_dnd() {
                 Ok(backend) => {
-                    if let Err(error) = handle.start_backend(self.clone(), backend, self.inner.input_backend.clone()) {
-                        tracing::warn!(%error, "drag backend failed");
+                    match handle.start_backend(self.clone(), backend, self.inner.input_backend.clone()) {
+                        Ok(()) => {
+                            // 注入 worker 的 DnD fences 契约从此有人履行；
+                            // Linux 初版 platform_dnd 失败时保持未置位。
+                            if let Some(input) = self.inner.input.get() {
+                                input.notify_dnd_native_available();
+                            }
+                        }
+                        Err(error) => tracing::warn!(%error, "drag backend failed"),
                     }
                 }
                 Err(error) => tracing::info!(%error, "drag and drop unavailable"),

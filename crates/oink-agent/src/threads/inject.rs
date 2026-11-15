@@ -129,6 +129,7 @@ pub struct InjectHandle {
     released_callback: ReleasedCallback,
     posting: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     backlog_trigger: std::sync::Arc<std::sync::atomic::AtomicBool>,
+
     ordinary_age: std::sync::Arc<oink_foundation::pending_age::PendingAge>,
     backend: std::sync::Arc<dyn oink_input::InputBackend>,
     released: std::sync::Arc<crossbeam_queue::ArrayQueue<DeviceId>>,
@@ -731,6 +732,8 @@ pub(crate) fn start_with_trace(
     let producers = posting.clone();
     let backlog_trigger = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let backlog = backlog_trigger.clone();
+    // DnD 原生后端可用性：worker 用它决定 DnD 命令是否建立 fences。
+    // start_platform_dnd 成功安装后端后置位（Linux 初版保持 false）。
     let ordinary_age = oink_foundation::pending_age::PendingAge::new(CAPACITY);
     let ordinary = ordinary_age.clone();
     let spawn = Box::new(move || {
@@ -1128,6 +1131,27 @@ pub(crate) fn start_with_trace(
                     }
                     InjectItem::Dnd { command, main } => {
                         cursor.clear();
+                        // DnD 后端不可用的平台（Linux 初版）：native 执行方不存在，
+                        // 「ready 由原生完成置位」的契约永远无人履行——此时若创建
+                        // dnd_pending，后续所有非移动事件（键盘/按钮/模式）都会
+                        // 堆进 deferred 并 park 到 read_back_at（最长 5s），触发
+                        // 「injection 积压 5s → 暂停共享」熔断。直接以已完成语义
+                        // 上报，不设立 fences。
+                        if !native.dnd_native_available() {
+                            let _ = main.send(super::MainCommand::Dnd {
+                                safety: queued.safety,
+                                command,
+                                completion: DndCompletion {
+                                    work: None,
+                                    ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                                    thread: std::thread::current(),
+                                    gate: parked.clone(),
+                                    source_motion: None,
+                                },
+                                report: queued.report,
+                            });
+                            continue;
+                        }
                         if matches!(&command, oink_routing::DndCmd::Begin { .. }) {
                             tracing::debug!(
                                 dnd_phase = 31_u64,

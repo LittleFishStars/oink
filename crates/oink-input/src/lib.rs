@@ -240,6 +240,15 @@ pub trait InputBackend: Send + Sync {
     fn set_cursor_constraint(&self, _bounds: Option<oink_foundation::Rect>) -> Result<(), InputError> {
         Ok(())
     }
+    /// DnD 原生后端安装成功（Windows/macOS；Linux 在 start_platform_dnd 成功后）。
+    /// 默认无操作：需要转达给注入层的平台实现它（Linux 的虚拟键盘/指针无状态可翻，
+    /// 但 oink-wayland 的 DnD fences 门控读它）。
+    fn mark_dnd_native_available(&self) {}
+    /// 注入 worker 读：DnD 命令是否建立 fences。默认 true（macOS/Windows 的
+    /// DnD 后端总是存在）；Linux 返回 oink-wayland 注入器的标志。
+    fn dnd_native_available(&self) -> bool {
+        true
+    }
     /// Native keyboard side effects follow the keyboard source route independently
     /// of the mouse cursor mode (notably macOS Caps Lock and input-source guarding).
     fn set_keyboard_remote(&self, _remote: bool) -> Result<(), InputError> {

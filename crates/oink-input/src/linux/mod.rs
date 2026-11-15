@@ -320,6 +320,23 @@ impl InputBackend for LinuxInput {
     fn injection_available(&self) -> Option<bool> {
         Some(self.wayland().has_virtual_pointer())
     }
+
+    fn mark_dnd_native_available(&self) {
+        if let Ok(inner) = self.inner() {
+            inner
+                .injectors
+                .dnd_native_available
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    fn dnd_native_available(&self) -> bool {
+        self.inner()
+            .map(|inner| {
+                inner.injectors.dnd_native_available.load(std::sync::atomic::Ordering::Acquire)
+            })
+            .unwrap_or(false)
+    }
 }
 
 /// 读 niri 配置里的触摸板自然滚动开关（非 niri 环境回退 false）。
