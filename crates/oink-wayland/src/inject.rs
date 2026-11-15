@@ -70,11 +70,12 @@ fn record_inject_cost(op: &str, cost: std::time::Duration) {
     }
 }
 
-/// 单调毫秒时间戳（u32 回绕）。
+/// 单调毫秒时间戳（u32 回绕）。evdev/wl 事件戳只要求单调与毫秒精度，
+/// 用 Instant（CLOCK_MONOTONIC vDSO）比 SystemTime 便宜且不受 NTP 跳变影响。
 fn stamp() -> u32 {
-    // 优先 CLOCK_MONOTONIC，取低 32 位毫秒。
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    (now.as_millis() % u32::MAX as u128) as u32
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let base = EPOCH.get_or_init(std::time::Instant::now);
+    base.elapsed().as_millis() as u32
 }
 
 /// 一块输出上的虚拟指针。
@@ -179,11 +180,12 @@ impl PointerInjector {
         let started = std::time::Instant::now();
         p.pointer.motion_absolute(t, (lx - p.x) as u32, (ly - p.y) as u32, p.width as u32, p.height as u32);
         p.pointer.frame();
-        self.wl.conn().flush().ok();
-        let cost = started.elapsed();
+        // Wayland 缓冲写满自动 flush；事件泵线程周期 flush。注入热路径
+        // 不做每事件 flush 系统调用（125Hz 下每 8ms 一次 syscall 会竞争
+        // 合成器 socket 并放大延迟）。
         drop(held);
         *self.last.lock().unwrap() = Some((lx, ly));
-        record_inject_cost("motion_absolute", cost);
+        record_inject_cost("motion_absolute", started.elapsed());
     }
 
     /// 相对移动（游戏模式 / MoveRelative）。不绑输出的全局指针更合适：

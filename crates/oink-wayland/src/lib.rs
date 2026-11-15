@@ -314,7 +314,7 @@ impl Wayland {
                         tracing::warn!("Wayland 事件泵停止（连接错误或协议错误）");
                         return;
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    std::thread::sleep(std::time::Duration::from_millis(20));
                 }
             })
             .map_err(|e| WaylandError::Connect(e.to_string()))?;
