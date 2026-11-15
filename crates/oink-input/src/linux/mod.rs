@@ -130,6 +130,16 @@ impl InputBackend for LinuxInput {
         let (tx, rx) = std::sync::mpsc::channel::<oink_foundation::input::CapturedEvent>();
         let control = inner.capture.control.clone();
         let can_capture = !inner.devices.is_empty();
+        // 热插拔上下文：蓝牙 HID 空闲断连时 evdev 节点消失、重连时在
+        // /dev/input 下重建——启动时的一次性枚举永远等不到重连后的
+        // 新节点（无线/蓝牙鼠标的必经之路）。owner 循环周期性对比
+        // discover_devices 与已知集合，新设备自动接入捕获。
+        let hp_tx = tx.clone();
+        let hp_control = control.clone();
+        let hp_ledger = inner.capture.ledger.clone();
+        let hp_grabbed = inner.capture.grabbed.clone();
+        let hp_known: std::collections::HashSet<std::path::PathBuf> =
+            inner.devices.iter().map(|(p, _)| p.clone()).collect();
         // start_loop 返回前必须同步安装 wake：InputThread::send 在启动序列里
         // 会立即 wake()()（OnceLock::get().expect），异步安装会留下竞态
         // （release 构建的调度差异让 observers 抢先于捕获线程）。
@@ -142,6 +152,8 @@ impl InputBackend for LinuxInput {
         let owner_thread = std::thread::Builder::new()
             .name("oink-linux-input".into())
             .spawn(move || {
+                let mut known = hp_known;
+                let mut last_scan = Instant::now();
                 while !control.stop.load(Ordering::Acquire) {
                     // 设备线程的事件串行喂给 owner（CaptureLoop 要求单线程调用）。
                     while let Ok(event) = rx.try_recv() {
@@ -149,6 +161,34 @@ impl InputBackend for LinuxInput {
                     }
                     if owner.stopped() {
                         break;
+                    }
+                    if last_scan.elapsed() >= Duration::from_secs(2) {
+                        last_scan = Instant::now();
+                        for (path, kind) in capture::discover_devices(Path::new("/dev/input")) {
+                            if known.insert(path.clone()) {
+                                tracing::info!(
+                                    target: "oink_gap",
+                                    ?path,
+                                    ?kind,
+                                    "evdev 热插拔：新设备接入捕获"
+                                );
+                                let shared = CaptureShared {
+                                    control: hp_control.clone(),
+                                    ledger: hp_ledger.clone(),
+                                    grabbed: hp_grabbed.clone(),
+                                };
+                                let hp_tx = hp_tx.clone();
+                                let sink: device_loop::Sink = Arc::new(move |event| {
+                                    let _ = hp_tx.send(event.clone());
+                                });
+                                let _ = std::thread::Builder::new()
+                                    .name(format!(
+                                        "oink-evdev-{}",
+                                        path.file_name().unwrap_or_default().to_string_lossy()
+                                    ))
+                                    .spawn(move || device_loop::device_thread(path, kind, shared, sink));
+                            }
+                        }
                     }
                     let due = owner
                         .poll(Instant::now())

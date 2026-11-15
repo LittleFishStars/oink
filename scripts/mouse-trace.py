@@ -32,7 +32,7 @@ def find_mice():
             elif line.startswith('H: Handlers='):
                 handlers = line.split('=', 1)[1].split()
                 events = [h for h in handlers if h.startswith('event')]
-                if 'mouse' in handlers and events:
+                if any(h.startswith('mouse') for h in handlers) and events:
                     mice.append((f'/dev/input/{events[0]}', cur.get('name', '?')))
     return mice
 

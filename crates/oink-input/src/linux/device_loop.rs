@@ -67,7 +67,13 @@ pub fn device_thread(
                 continue;
             }
             Err(e) => {
-                tracing::warn!(path = %path.display(), %e, "evdev 读取失败，设备线程退出");
+                if e.raw_os_error() == Some(19) {
+                    // ENODEV：蓝牙 HID 空闲断连等正常消失——热插拔扫描会在
+                    // 设备重连时重新接入，不算故障。
+                    tracing::info!(path = %path.display(), "evdev 设备已断连，设备线程退出");
+                } else {
+                    tracing::warn!(path = %path.display(), %e, "evdev 读取失败，设备线程退出");
+                }
                 return;
             }
         };
