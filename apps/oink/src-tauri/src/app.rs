@@ -619,18 +619,54 @@ fn show_main_on_main(app: &AppHandle) {
 #[cfg(any(windows, target_os = "linux"))]
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let icon = crate::app_icon::tray_image(app).map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
-    TrayIconBuilder::with_id("main")
-        .icon(icon)
-        .title("Oink")
-        .tooltip("Oink")
-        .show_menu_on_left_click(false)
-        .build(app)?;
-    // Linux 上 build 成功 = 已向 StatusNotifier 总线注册条目；图标是否「可见」
-    // 还取决于桌面面板是否提供 StatusNotifierWatcher（waybar/noctalia 的 tray 模块）。
     #[cfg(target_os = "linux")]
-    tracing::info!("tray icon registered via libayatana-appindicator");
+    {
+        // SNI 条目必须带菜单：libayatana 的条目没有菜单时 SNI 的 Menu 属性是
+        // 无效路径 "/"，noctalia 等面板渲染这种条目会失败/跳过（实测 Oink 无
+        // 菜单时条目从未出现在 RegisteredStatusNotifierItems，而带菜单的
+        // Betterbird/motrix 正常）。Quit 与「关闭窗口」同语义：停后台后退出。
+        use tauri::menu::{Menu, MenuItem};
+        let show = MenuItem::with_id(app, "tray_show", "显示 Oink", true, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "tray_quit", "退出 Oink", true, None::<&str>)?;
+        let menu = Menu::with_items(app, &[&show, &quit])?;
+        TrayIconBuilder::with_id("main")
+            .icon(icon)
+            .title("Oink")
+            .tooltip("Oink")
+            .menu(&menu)
+            .show_menu_on_left_click(false)
+            .on_tray_icon_event(|tray, event| {
+                if let tauri::tray::TrayIconEvent::Click {
+                    button: tauri::tray::MouseButton::Left,
+                    button_state: tauri::tray::MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    show_main(tray.app_handle());
+                }
+            })
+            .on_menu_event(|app, event| match event.id().as_ref() {
+                "tray_show" => show_main(app),
+                "tray_quit" => {
+                    let data = oink_foundation::paths::data_dir();
+                    let _ = oink_agent::host::stop_backend(&data, std::time::Duration::from_secs(15));
+                    app.exit(0);
+                }
+                _ => {}
+            })
+            .build(app)?;
+        tracing::info!("tray icon registered via libayatana-appindicator (menu attached)");
+    }
     #[cfg(windows)]
-    crate::tray_windows::install(app)?;
+    {
+        TrayIconBuilder::with_id("main")
+            .icon(icon)
+            .title("Oink")
+            .tooltip("Oink")
+            .show_menu_on_left_click(false)
+            .build(app)?;
+        crate::tray_windows::install(app)?;
+    }
     crate::app_icon::tray_created(app);
     Ok(())
 }
