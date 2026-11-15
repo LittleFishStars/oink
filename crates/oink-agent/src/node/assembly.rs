@@ -114,7 +114,13 @@ impl Node {
         self.publish_local_options();
         self.publish_local_permissions();
         let initial_group = group.clone();
-        tokio::task::spawn_blocking(move || initial_group.initialize_displays(initial_displays))
+        tokio::task::spawn_blocking(move || {
+            initial_group.initialize_displays(initial_displays)?;
+            // gap_travel 协议默认 false；macOS/Windows 由安装器写入 true，
+            // Linux 的自动布局没有那一步——屏幕边缘穿越是软件 KVM 的核心
+            // 能力，这里显式开启（设置仍可经 edit_settings 覆盖）。
+            initial_group.edit_settings(Box::new(|settings: &mut oink_display::layout::LayoutSettings| settings.gap_travel = true))
+        })
             .await
             .context("join display initialization")?
             .context("initialize group displays")?;
