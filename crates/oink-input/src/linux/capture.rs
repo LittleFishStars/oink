@@ -261,6 +261,9 @@ pub struct EventAssembler {
     /// 触摸板 slot → 上一个坐标。
     pub slots: BTreeMap<i32, (f64, f64)>,
     pub slot: i32,
+    /// 触摸板当前 slot 的本次 ABS_MT 更新（SYN 时与 `slots` 差分）。
+    pub abs_x: Option<f64>,
+    pub abs_y: Option<f64>,
     /// 本帧的相对位移累积。
     pub dx: f64,
     pub dy: f64,
@@ -268,9 +271,49 @@ pub struct EventAssembler {
     pub hwheel: f64,
 }
 
+impl EventAssembler {
+    /// 触摸板 ABS_MT 位置差分：i2c-hid 触摸板上报的是绝对坐标（ABS_MT_*），
+    /// 不转成相对位移就永远没有 PointerDelta——REL 只来自真鼠标，而
+    /// 蓝牙鼠标还会休眠断连。多点 slot 各自跟踪；BTN_TOUCH 抬起时清表
+    /// （下次按下重新锚定，避免把位置跳变当位移）。
+    pub fn absorb_abs_motion(&mut self, speed: f64) {
+        if let (Some(nx), Some(ny)) = (self.abs_x.take(), self.abs_y.take()) {
+            if let Some((px, py)) = self.slots.insert(self.slot, (nx, ny)) {
+                let (ddx, ddy) = (nx - px, ny - py);
+                if ddx != 0.0 || ddy != 0.0 {
+                    self.dx += ddx * speed;
+                    self.dy += ddy * speed;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn touchpad_abs_motion_becomes_relative_delta() {
+        let mut asm = EventAssembler::default();
+        asm.slot = 0;
+        // 首次触达：锚定，不产生位移。
+        asm.abs_x = Some(500.0);
+        asm.abs_y = Some(300.0);
+        asm.absorb_abs_motion(1.0);
+        assert_eq!((asm.dx, asm.dy), (0.0, 0.0));
+        // 滑动：差分为相对位移并按 speed 缩放。
+        asm.abs_x = Some(540.0);
+        asm.abs_y = Some(280.0);
+        asm.absorb_abs_motion(2.0);
+        assert_eq!((asm.dx, asm.dy), (80.0, -40.0));
+        // 抬起清锚点：下次按下重新锚定，不跳变。
+        asm.slots.clear();
+        asm.abs_x = Some(100.0);
+        asm.abs_y = Some(100.0);
+        asm.absorb_abs_motion(2.0);
+        assert_eq!((asm.dx, asm.dy), (80.0, -40.0));
+    }
 
     #[test]
     fn classifies_keyboard_mouse_touchpad() {

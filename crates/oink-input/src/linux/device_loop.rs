@@ -98,7 +98,29 @@ pub fn device_thread(
                         frame.push(InputEvent::Key { code: key, pressed });
                     }
                 }
-                evdev::EventType::KEY => {}
+                evdev::EventType::KEY => {
+                    // 触摸板抬起（BTN_TOUCH=0）：清 slot 锚点，下次按下
+                    // 重新锚定，避免把按下位置与抬起位置的差当位移。
+                    if ev.code() == evdev::KeyCode::BTN_TOUCH.0 && ev.value() == 0 {
+                        asm.slots.clear();
+                        asm.abs_x = None;
+                        asm.abs_y = None;
+                    }
+                }
+                evdev::EventType::ABSOLUTE => {
+                    // 触摸板本体（event5 Touchpad）上报 ABS_MT 绝对坐标；
+                    // 不处理就永远没有 PointerDelta（REL 只来自真鼠标）。
+                    match ev.code() {
+                        c if c == evdev::AbsoluteAxisCode::ABS_MT_SLOT.0 => asm.slot = ev.value(),
+                        c if c == evdev::AbsoluteAxisCode::ABS_MT_POSITION_X.0 => {
+                            asm.abs_x = Some(f64::from(ev.value()));
+                        }
+                        c if c == evdev::AbsoluteAxisCode::ABS_MT_POSITION_Y.0 => {
+                            asm.abs_y = Some(f64::from(ev.value()));
+                        }
+                        _ => {}
+                    }
+                }
                 evdev::EventType::RELATIVE => {
                     let value = f64::from(ev.value());
                     match rel_axis_from_evdev(ev.code()) {
@@ -112,7 +134,8 @@ pub fn device_thread(
                     }
                 }
                 evdev::EventType::SYNCHRONIZATION => {
-                    // 一帧结束：位移与滚轮一次性上报。
+                    // 一帧结束：先结算触摸板 ABS 差分，再统一上报。
+                    asm.absorb_abs_motion(speed);
                     if asm.dx != 0.0 || asm.dy != 0.0 {
                         let pos = ledger.advance(asm.dx, asm.dy);
                         // PointerDelta 是路由的正常移动通道：Local（本机作为源机
