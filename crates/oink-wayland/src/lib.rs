@@ -257,6 +257,10 @@ pub struct Wayland {
     shared: Shared,
     pump_done: Arc<AtomicBool>,
     pump: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// outputs() 的缓存：(代数, 精化后的输出)。niri IPC 精化需要 fork 子进程
+    /// （实测约 60ms/次），绝不能出现在 125Hz 注入热路径上；只在输出几何
+    /// 代数变化（插拔/改分辨率）时重跑。
+    refined: Mutex<Option<(u64, Vec<OutputInfo>)>>,
 }
 
 impl std::fmt::Debug for Wayland {
@@ -302,14 +306,14 @@ impl Wayland {
         // flush 由调用方完成，不依赖本泵。
         let done = Arc::new(AtomicBool::new(false));
         let pump_done = done.clone();
-        let pump_conn = conn.clone();
         let handle = std::thread::Builder::new()
             .name("oink-wayland-pump".into())
             .spawn(move || {
                 let mut client = Client;
                 while !pump_done.load(Ordering::Acquire) {
-                    pump_conn.flush().ok();
-                    // dispatch_pending 一次排空全部已到达事件；无新事件返回 Ok(0)。
+                    // dispatch_pending 含隐式 flush+非阻塞 read；发送侧的 flush
+                    // 由注入线程自己做（移动流是延迟敏感的）。pump 只收事件，
+                    // 不与注入线程抢 protocol 锁发数据。
                     if queue.dispatch_pending(&mut client).is_err() {
                         tracing::warn!("Wayland 事件泵停止（连接错误或协议错误）");
                         return;
@@ -324,6 +328,7 @@ impl Wayland {
             shared,
             pump_done: done,
             pump: Mutex::new(Some(handle)),
+            refined: Mutex::new(None),
         }))
     }
 
@@ -342,7 +347,17 @@ impl Wayland {
     }
 
     /// 启用的输出（按 (y, x) 排序）。
+    ///
+    /// 带代数缓存：`refine_with_niri_ipc` 要 fork `niri` 子进程（实测约 60ms），
+    /// 注入热路径（125Hz）每事件调一次会把注入队列压垮并触发 5 秒积压熔断。
+    /// 几何代数不变时直接返回缓存；只有插拔/改分辨率才重跑 IPC 精化。
     pub fn outputs(&self) -> Vec<OutputInfo> {
+        let generation = self.shared.outputs_generation.load(Ordering::Acquire);
+        if let Some((cached, outs)) = self.refined.lock().unwrap().as_ref() {
+            if *cached == generation {
+                return outs.clone();
+            }
+        }
         let mut outs: Vec<OutputInfo> = self
             .shared
             .outputs
@@ -354,6 +369,7 @@ impl Wayland {
             .collect();
         refine_with_niri_ipc(&mut outs);
         outs.sort_by_key(|o| (o.y, o.x));
+        *self.refined.lock().unwrap() = Some((generation, outs.clone()));
         outs
     }
 

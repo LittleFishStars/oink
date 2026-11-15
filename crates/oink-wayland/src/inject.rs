@@ -10,7 +10,7 @@
 //! 时间戳：u32 毫秒，单调时钟回绕到 0。
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use wayland_client::protocol::wl_keyboard::KeyState;
@@ -94,6 +94,8 @@ pub struct PointerInjector {
     wl: std::sync::Arc<Wayland>,
     manager: ZwlrVirtualPointerManagerV1,
     pointers: Mutex<Vec<OutputPointer>>,
+    /// pointers 构建时的输出代数；未变化时热路径完全跳过重建检查。
+    built_generation: AtomicU64,
     /// 最后一次注入的光标位置（全局逻辑坐标）。Wayland 客户端无法读全局光标，
     /// 注入即记账（与 Windows 后端的注入目标账本一致）。
     last: Mutex<Option<(f64, f64)>>,
@@ -104,12 +106,22 @@ impl PointerInjector {
         let manager = wl
             .with_globals(|g| g.vp_manager.clone())
             .ok_or_else(|| WaylandError::Connect("缺少 zwlr_virtual_pointer_manager_v1".into()))?;
-        Ok(Self { wl, manager, pointers: Mutex::new(Vec::new()), last: Mutex::new(None) })
+        Ok(Self {
+            wl,
+            manager,
+            pointers: Mutex::new(Vec::new()),
+            built_generation: AtomicU64::new(u64::MAX),
+            last: Mutex::new(None),
+        })
     }
 
     /// 输出几何可能变了：核对并重建缺少的输出指针、丢弃消失的。
     fn ensure_pointers(&self) {
         let generation = self.wl.outputs_generation();
+        // 代数未变：指针集合就是最新的，热路径零成本返回。
+        if self.built_generation.load(Ordering::Acquire) == generation {
+            return;
+        }
         let outputs = self.wl.outputs();
         {
             let held = self.pointers.lock().unwrap();
@@ -137,7 +149,7 @@ impl PointerInjector {
             });
         }
         *self.pointers.lock().unwrap() = fresh;
-        let _ = generation;
+        self.built_generation.store(generation, Ordering::Release);
     }
 
     fn output_proxy(&self, id: u32) -> Option<WlOutput> {
@@ -180,9 +192,10 @@ impl PointerInjector {
         let started = std::time::Instant::now();
         p.pointer.motion_absolute(t, (lx - p.x) as u32, (ly - p.y) as u32, p.width as u32, p.height as u32);
         p.pointer.frame();
-        // Wayland 缓冲写满自动 flush；事件泵线程周期 flush。注入热路径
-        // 不做每事件 flush 系统调用（125Hz 下每 8ms 一次 syscall 会竞争
-        // 合成器 socket 并放大延迟）。
+        // 移动注入必须立刻 flush：指针事件对 niri 是延迟敏感流，攒在缓冲里
+        // 等 pump 周期（20ms）会把每一步移动都加一层可感知滞后。flush 在
+        // 缓冲非空时只是 write syscall；空缓冲时是廉价的状态检查。
+        self.wl.conn().flush().ok();
         drop(held);
         *self.last.lock().unwrap() = Some((lx, ly));
         record_inject_cost("motion_absolute", started.elapsed());
