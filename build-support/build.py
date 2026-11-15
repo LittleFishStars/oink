@@ -16,7 +16,7 @@ from update_qualification import origin as test_origin, verify_binaries
 
 ROOT = Path(__file__).resolve().parents[1]
 IDENTITY = json.loads((ROOT / 'packaging/identity.json').read_text())
-TARGETS = ('aarch64-apple-darwin', 'x86_64-pc-windows-msvc')
+TARGETS = ('aarch64-apple-darwin', 'x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu')
 
 
 def run(*args, **kwargs):
@@ -120,6 +120,7 @@ def main():
     if a.windows_update_test_feed:
         features += ',oink-winsvc/test-feed'
     macos = a.target == TARGETS[0]
+    linux = a.target == TARGETS[2]
     if macos:
         # rustc must gather native objects while its LTO temporary directories
         # still exist; running dsymutil later loses their debug information.
@@ -154,15 +155,23 @@ def main():
     # A second cargo build without the UI used a smaller graph and recompiled
     # the backend and its dependencies. Keep Tauri's config/frontend preparation.
     packages = ['-p', 'oink-ui', '-p', 'oink-agent', '-p', 'oink-crash']
-    if not macos:
+    if a.target == TARGETS[1]:
         packages += ['-p', 'oink-winsvc']
     run(npm, 'run', '-w', 'apps/oink', 'tauri', '--', 'build', '--ci', '--no-bundle', '--no-sign',
         '--target', a.target, '--features', features, '--config', json.dumps(config), '--', '--locked', *packages,
         cwd=ROOT, env=environment)
-    roles = ['ui', 'agent', 'crash_collector', 'backend'] if macos else ['ui', 'agent', 'service', 'update_worker', 'crash_collector']
+    if linux:
+        roles = ['ui', 'agent', 'crash_collector']
+        suffix = ''
+    elif macos:
+        roles = ['ui', 'agent', 'crash_collector', 'backend']
+        suffix = ''
+    else:
+        roles = ['ui', 'agent', 'service', 'update_worker', 'crash_collector']
+        suffix = '.exe'
     output = Path(environment.get('CARGO_TARGET_DIR', ROOT / 'target')) / a.target / 'release'
-    names = [IDENTITY['binaries'][role] + ('' if macos else '.exe') for role in roles]
-    if not macos:
+    names = [IDENTITY['binaries'][role] + suffix for role in roles]
+    if a.target == TARGETS[1]:
         from windows_version import set_display_version
         for name in names:
             changed = set_display_version(output / name, display_version)
