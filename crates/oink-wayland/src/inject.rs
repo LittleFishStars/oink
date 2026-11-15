@@ -25,6 +25,51 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
 use crate::keymap::KeymapFile;
 use crate::{Client, Wayland, WaylandError};
 
+/// 注入耗时统计：慢注入（>8ms）告警，正常路径定期 debug 以便确认注入在跑。
+static INJECT_STATS: std::sync::Mutex<Option<InjectStats>> = std::sync::Mutex::new(None);
+
+struct InjectStats {
+    count: u64,
+    slow: u64,
+    max_us: u128,
+    window: std::time::Instant,
+}
+
+fn record_inject_cost(op: &str, cost: std::time::Duration) {
+    let mut stats = INJECT_STATS.lock().unwrap();
+    let s = stats.get_or_insert_with(|| InjectStats {
+        count: 0,
+        slow: 0,
+        max_us: 0,
+        window: std::time::Instant::now(),
+    });
+    s.count += 1;
+    s.max_us = s.max_us.max(cost.as_micros());
+    let slow = cost > std::time::Duration::from_millis(8);
+    if slow {
+        s.slow += 1;
+    }
+    if s.window.elapsed() > std::time::Duration::from_secs(2) {
+        if s.slow > 0 {
+            tracing::warn!(
+                op,
+                count = s.count,
+                slow = s.slow,
+                max_us = s.max_us as u64,
+                "Wayland 注入存在明显延迟（>8ms/次，125Hz 下会积压触发暂停）"
+            );
+        } else if s.count > 0 {
+            tracing::debug!(op, count = s.count, max_us = s.max_us as u64, "Wayland 注入窗口统计");
+        }
+        *s = InjectStats {
+            count: 0,
+            slow: 0,
+            max_us: 0,
+            window: std::time::Instant::now(),
+        };
+    }
+}
+
 /// 单调毫秒时间戳（u32 回绕）。
 fn stamp() -> u32 {
     // 优先 CLOCK_MONOTONIC，取低 32 位毫秒。
@@ -131,11 +176,14 @@ impl PointerInjector {
         let lx = x.clamp(p.x, p.x + p.width - 1.0);
         let ly = y.clamp(p.y, p.y + p.height - 1.0);
         let t = stamp();
+        let started = std::time::Instant::now();
         p.pointer.motion_absolute(t, (lx - p.x) as u32, (ly - p.y) as u32, p.width as u32, p.height as u32);
         p.pointer.frame();
         self.wl.conn().flush().ok();
+        let cost = started.elapsed();
         drop(held);
         *self.last.lock().unwrap() = Some((lx, ly));
+        record_inject_cost("motion_absolute", cost);
     }
 
     /// 相对移动（游戏模式 / MoveRelative）。不绑输出的全局指针更合适：

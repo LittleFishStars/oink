@@ -115,7 +115,10 @@ pub fn device_thread(
                             frame.push(InputEvent::PointerDelta { dx: asm.dx, dy: asm.dy });
                         }
                         frame.push(InputEvent::RawPointerDelta { dx: asm.dx, dy: asm.dy });
-                        let _ = pos; // 光标由 ledger 维护
+                        // RawPointerDelta 也要带 cursor：路由的边缘穿越判定
+                        // （local_motion_unconstrained）没有 cursor 直接 Pass。
+                        // ledger 是注入/捕获共享的虚拟光标，Wayland 读不到全局
+                        // 光标时它就是唯一的绝对位置来源。
                     }
                     if remote_now && (asm.wheel != 0.0 || asm.hwheel != 0.0) {
                         frame.push(InputEvent::Scroll {
