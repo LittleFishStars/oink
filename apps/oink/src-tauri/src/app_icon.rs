@@ -134,6 +134,26 @@ pub(crate) fn dock(app: &AppHandle, force: bool) {
     }
 }
 
+/// Linux：静态产品图标；托盘状态着色与显示尺寸通知是 Windows 专有链路，
+/// 初版不做（图标功能后续接 tray_image 的通用渲染）。
+#[cfg(target_os = "linux")]
+pub(crate) fn tray_created(_app: &AppHandle) {}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn tray_image(_app: &AppHandle) -> Result<tauri::image::Image<'static>, String> {
+    let png = crate::icon_render::render(
+        crate::icon_render::Artwork::Mac,
+        crate::icon_render::Appearance {
+            dark: oink_agent::appearance::system_dark(),
+            accent: [231, 54, 129], // 默认 accent（与产品一致）
+        },
+        32,
+    )?
+    .encode_png()
+    .map_err(|e| e.to_string())?;
+    tauri::image::Image::from_bytes(&png).map_err(|e| e.to_string())
+}
+
 #[cfg(windows)]
 pub(crate) fn tray_created(app: &AppHandle) {
     if let Err(error) = platform::watch_tray_metrics(app) {

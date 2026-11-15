@@ -2,7 +2,7 @@
 use std::sync::{Arc, Mutex};
 
 use oink_agent::api::{self, AgentApi, ApiError, ApiEvent, Reply, Request};
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, State};
 
@@ -412,6 +412,9 @@ pub fn run() {
                 crate::foreground_windows::install(&handle);
                 setup_tray(&handle)?;
             }
+            // Linux：libayatana-appindicator 托盘（无 Windows 的菜单接管层）。
+            #[cfg(target_os = "linux")]
+            setup_tray(&handle)?;
             forward_events(&handle);
             crate::native_controls::initialize(&handle);
             #[cfg(windows)]
@@ -561,7 +564,16 @@ pub fn run() {
         if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
             // Last-window close destroys its WebView, leaving an empty event loop
             // available for the next status-item click. Explicit exit still exits.
+            #[cfg(not(target_os = "linux"))]
             api.prevent_exit();
+            // Linux：最后一个窗口关闭 = 退出并停后台（用户预期「关闭软件」关闭
+            // 全部进程；托盘菜单的 Quit 仍走 shell_quit 停后台后退出）。
+            #[cfg(target_os = "linux")]
+            {
+                let data = oink_foundation::paths::data_dir();
+                let _ = oink_agent::host::stop_backend(&data, std::time::Duration::from_secs(15));
+                // 不 prevent_exit：让事件循环继续走 Exit，从而执行 shutdown。
+            }
         }
         if matches!(event, tauri::RunEvent::Exit) {
             crate::shell::shutdown(handle);
@@ -604,7 +616,7 @@ fn show_main_on_main(app: &AppHandle) {
     crate::shell::open_normal(app, crate::shell_policy::View::Main);
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let icon = crate::app_icon::tray_image(app).map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
     TrayIconBuilder::with_id("main")
@@ -612,6 +624,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .tooltip("Oink")
         .show_menu_on_left_click(false)
         .build(app)?;
+    #[cfg(windows)]
     crate::tray_windows::install(app)?;
     crate::app_icon::tray_created(app);
     Ok(())
