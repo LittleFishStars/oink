@@ -59,13 +59,34 @@ pub fn ensure_backend(remote: &RemoteApi, data_dir: &Path) -> Result<(), String>
     let mut command = Command::new(&binary);
     command.arg("run");
     // 数据目录经环境传递，保证 UI 与后台看同一个 home（OINK_HOME 已设置时继承）。
-    oink_agent::backend::launch::spawn_detached(&mut command)
+    let mut child = oink_agent::backend::launch::spawn_detached(&mut command)
         .map_err(|e| format!("failed to start {}: {e}", binary.display()))?;
+    tracing::info!(pid = child.id(), "backend process spawned");
 
     let deadline = Instant::now() + START_TIMEOUT;
     let mut last_error = String::new();
+    // 锁文件可能在进程已死后残留：连续多轮「is_running 为真但 IPC 不通」
+    // 说明起出来的 agent 已经退出（典型原因：端口被另一个实例占用），
+    // 不必把 20 秒预算耗尽。
+    let mut unreachable_polls = 0u32;
+    let mut exited_at: Option<std::process::ExitStatus> = None;
     while Instant::now() < deadline {
         std::thread::sleep(POLL);
+        // 拉起的进程已退出：不必等满预算，直接给出可操作原因。
+        if exited_at.is_none() {
+            if let Ok(Some(status)) = child.try_wait() {
+                exited_at = Some(status);
+                tracing::warn!(?status, "spawned backend exited early");
+            }
+        }
+        if let Some(status) = exited_at {
+            return Err(format!(
+                "后台启动后立即退出（{status}）：常见原因是端口冲突\
+                 （另一个 Oink 实例已占用 QUIC 47470 / IPC 47472）。\
+                 先 `oink-agent stop` 或结束其它实例再试；\
+                 也可用 OINK_HOME 指向独立数据目录做隔离测试。"
+            ));
+        }
         match oink_agent::instance::is_running(data_dir) {
             None => return Err("backend_ownership_unavailable".into()),
             Some(false) => continue,
@@ -76,7 +97,17 @@ pub fn ensure_backend(remote: &RemoteApi, data_dir: &Path) -> Result<(), String>
                         tracing::info!("backend started and handshook");
                         return Ok(());
                     }
-                    Err(error) => last_error = error.to_string(),
+                    Err(error) => {
+                        last_error = error.to_string();
+                        unreachable_polls += 1;
+                        if unreachable_polls >= 20 {
+                            return Err(format!(
+                                "后台已启动但 IPC 无响应：可能端口被另一个 Oink 实例占用\
+                                 （默认 QUIC 47470 / IPC 47472）。\
+                                 请先 `oink-agent stop` 或结束其它实例后重试。详情：{last_error}"
+                            ));
+                        }
+                    }
                 }
             }
         }

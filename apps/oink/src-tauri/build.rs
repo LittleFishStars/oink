@@ -2,6 +2,12 @@ fn main() {
     println!("cargo:rerun-if-env-changed=OINK_RELEASE_VERSION");
     println!("cargo:rerun-if-env-changed=OINK_RELEASE_BUILD");
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    // Linux：必须跑 tauri_build::build()，否则 Tauri 的资源嵌入管线不注册，
+    // 带 custom-protocol 编译时前端仍会去连 devUrl（localhost:1440）。
+    if target_os == "linux" {
+        tauri_build::build();
+        return;
+    }
     if target_os != "macos" && target_os != "windows" {
         return;
     }
