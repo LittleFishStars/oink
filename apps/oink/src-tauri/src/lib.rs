@@ -19,6 +19,8 @@ mod local_drop_windows;
 #[cfg(any(windows, test))]
 mod menu_icons_windows;
 pub mod service;
+#[cfg(target_os = "linux")]
+mod service_linux;
 pub mod shell_policy;
 #[cfg(any(target_os = "macos", windows, target_os = "linux", test))]
 mod sponsor;

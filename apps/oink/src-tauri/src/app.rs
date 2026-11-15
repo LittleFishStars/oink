@@ -281,7 +281,18 @@ pub fn run() {
                 return;
             }
         }
-        #[cfg(not(windows))]
+        #[cfg(all(not(windows), target_os = "linux"))]
+        {
+            // Linux：后台未运行时自动拉起（与 Windows 的 start_once 语义对齐：
+            // 只在启动时尝试一次，UI 生命周期内不重启崩溃的后台）。
+            // ensure_backend 自身包含所有权校验与 hello 握手，故不前置
+            // check_backend_ownership（否则后台未启动时会被提前拒绝）。
+            if let Err(error) = crate::service_linux::ensure_backend(&remote, &data_dir) {
+                tracing::error!(%error, "backend unavailable");
+                return;
+            }
+        }
+        #[cfg(all(not(windows), not(target_os = "linux")))]
         {
             if let Err(error) = crate::service::check_backend_ownership(&data_dir) {
                 tracing::error!(%error, "backend process ownership unavailable");
