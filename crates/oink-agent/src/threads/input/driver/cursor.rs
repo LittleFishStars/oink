@@ -104,12 +104,14 @@ impl Driver {
         }
         let router = self.adapter.router();
         let game_escape = router.game_escape_readback(source.unwrap_or(peer));
-        if pointer_motion(&message, game_escape)
-            && self.adapter.attached(peer)
-            && router.has_pointer_focus()
+        let readback_needed = router.has_pointer_focus()
             && !router.paused()
             && (!router.game_mode().active || game_escape)
             && !router.local_displays().is_empty()
+            && self.inject.backend().cursor_readback_needed();
+        if pointer_motion(&message, game_escape)
+            && readback_needed
+            && self.adapter.attached(peer)
         {
             // Network reads stop as soon as this slot is occupied. Reliable
             // buttons/keys and later datagrams remain in their bounded queues.

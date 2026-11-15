@@ -330,6 +330,9 @@ impl InputBackend for LinuxInput {
         }
     }
 
+    fn cursor_readback_needed(&self) -> bool {
+        false
+    }
     fn dnd_native_available(&self) -> bool {
         self.inner()
             .map(|inner| {
