@@ -109,16 +109,16 @@ pub fn device_thread(
                     // 一帧结束：位移与滚轮一次性上报。
                     if asm.dx != 0.0 || asm.dy != 0.0 {
                         let pos = ledger.advance(asm.dx, asm.dy);
-                        // Local 模式只上报位移（供路由做边缘穿越判定）；
-                        // 按钮/键盘不上报，避免本机按下被误吞或重复注入。
-                        if remote_now {
-                            frame.push(InputEvent::PointerDelta { dx: asm.dx, dy: asm.dy });
-                        }
+                        // PointerDelta 是路由的正常移动通道：Local（本机作为源机
+                        // 推向另一台设备边缘）与 Remote 都要上报——边缘穿越判定
+                        // （local_motion → gap_local_motion）只认 PointerDelta，
+                        // 漏发会让本机鼠标永远穿不过去（Linux 移植遗漏）。
+                        // RawPointerDelta 是游戏模式的相对观察流，另算。
+                        frame.push(InputEvent::PointerDelta { dx: asm.dx, dy: asm.dy });
                         frame.push(InputEvent::RawPointerDelta { dx: asm.dx, dy: asm.dy });
-                        // RawPointerDelta 也要带 cursor：路由的边缘穿越判定
-                        // （local_motion_unconstrained）没有 cursor 直接 Pass。
-                        // ledger 是注入/捕获共享的虚拟光标，Wayland 读不到全局
-                        // 光标时它就是唯一的绝对位置来源。
+                        // 两者都带 cursor（ledger 虚拟光标）：Wayland 读不到全局
+                        // 光标，ledger 是唯一的绝对位置来源，local_motion 无 cursor
+                        // 直接 Pass。
                     }
                     if remote_now && (asm.wheel != 0.0 || asm.hwheel != 0.0) {
                         frame.push(InputEvent::Scroll {
