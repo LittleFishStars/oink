@@ -2490,6 +2490,32 @@ impl CaptureLoop for Driver {
         self.wake_if_earlier();
     }
     fn event(&mut self, event: &CapturedEvent) -> Disposition {
+        // 验证期（穿越排查的最后一块拼图）：本机捕获事件的最终入口。
+        // PointerDelta 每 5 秒一条，记录两道闸门状态——safety 未激活
+        // （共享会话未建立/已暂停）时事件在这里就被丢弃，永远进不了
+        // 路由的穿越判定；capture/fully_paused 同理。到达这里却没有
+        // 后续 oink_gap 日志时，断点必在这几个闸门之一。
+        if let oink_foundation::input::InputEvent::PointerDelta { dx, dy } = event.event {
+            static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| u64::try_from(d.as_millis()).unwrap_or(0))
+                .unwrap_or(0);
+            let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+            if now_ms.saturating_sub(last) >= 5_000 {
+                LAST.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+                let safety = self.inject.backend().input_safety();
+                let safety_accepts = safety.accepts(self.input_safety);
+                tracing::info!(
+                    target: "oink_gap",
+                    dx, dy,
+                    safety_active = safety.active(),
+                    safety_accepts,
+                    fully_paused = self.adapter.router().fully_paused(),
+                    "本机 PointerDelta 到达 driver.event（验证期，5s 一条）"
+                );
+            }
+        }
         if !self.inject.backend().input_safety().accepts(self.input_safety) {
             return Disposition::Pass;
         }
