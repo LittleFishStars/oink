@@ -26,7 +26,10 @@ top -H -b -n 2 -d 1.5 2>/dev/null | awk '
   /PID|oink/{print}
 ' | grep -i oink | head -12 | sed 's/^/  /'
 
-echo "════════ 5. 卡顿时的调用栈（若装了 gdb，抓 oink-agent 主线程）════════"
+echo "════════ 5. WebKit 渲染进程（UI 动画卡顿的真凶在这里）════════"
+ps -eo pid,pcpu,comm --sort=-pcpu | grep -iE 'webkit|oink' | head -8 | sed 's/^/  /'
+
+echo "════════ 6. 卡顿时的调用栈（若装了 gdb）════════"
 AGENT=$(pgrep -f 'oink-agent run' | head -1)
 if [ -n "${AGENT:-}" ] && command -v gdb >/dev/null 2>&1; then
   timeout 8 gdb -p "$AGENT" -batch -ex 'thread apply all bt' 2>/dev/null | \

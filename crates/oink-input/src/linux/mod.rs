@@ -178,6 +178,9 @@ impl InputBackend for LinuxInput {
                     .name(format!("oink-evdev-{}", path.file_name().unwrap_or_default().to_string_lossy()))
                     .spawn(move || device_loop::device_thread(path, kind, shared, sink));
             }
+            for (path, kind) in &inner.devices {
+                tracing::info!(target: "oink_gap", ?path, ?kind, "evdev 设备入捕获列表");
+            }
             tracing::info!(count = inner.devices.len(), "evdev 捕获设备线程就绪");
         } else {
             tracing::warn!("无可用 evdev 设备或权限不足：本机只作为被控端（加入 input 组即可当源机）");
