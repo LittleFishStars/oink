@@ -551,6 +551,16 @@ pub fn run() {
             }
         }
         if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
+            #[cfg(target_os = "linux")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = &event {
+                // 关窗 = 隐藏窗口、进程与后台 agent 继续运行（KVM 语义：
+                // 设置界面关了，跨机输入不能断）。托盘左键或菜单「显示
+                // Oink」重新打开；真正退出走托盘菜单「退出 Oink」。
+                api.prevent_close();
+                if let Some(window) = handle.get_webview_window(label) {
+                    let _ = window.hide();
+                }
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let label = label.clone();
                 crate::app::on_main(handle, move |app| crate::shell::window_destroyed(app, &label));
@@ -562,18 +572,10 @@ pub fn run() {
             let _ = label;
         }
         if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
-            // Last-window close destroys its WebView, leaving an empty event loop
-            // available for the next status-item click. Explicit exit still exits.
-            #[cfg(not(target_os = "linux"))]
+            // 所有平台一致：无显式退码的退出请求（窗口全关/webview 异常）
+            // 都保持后台——托盘仍在，随时重新打开；显式退出（托盘「退出
+            // Oink」exit(0)）不进此分支，照常退出。
             api.prevent_exit();
-            // Linux：最后一个窗口关闭 = 退出并停后台（用户预期「关闭软件」关闭
-            // 全部进程；托盘菜单的 Quit 仍走 shell_quit 停后台后退出）。
-            #[cfg(target_os = "linux")]
-            {
-                let data = oink_foundation::paths::data_dir();
-                let _ = oink_agent::host::stop_backend(&data, std::time::Duration::from_secs(15));
-                // 不 prevent_exit：让事件循环继续走 Exit，从而执行 shutdown。
-            }
         }
         if matches!(event, tauri::RunEvent::Exit) {
             crate::shell::shutdown(handle);
