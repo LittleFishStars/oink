@@ -449,7 +449,7 @@ impl Router {
                 let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
                 if now_us.saturating_sub(last) >= 1_000_000 {
                     LAST.store(now_us, std::sync::atomic::Ordering::Relaxed);
-                    tracing::info!(
+                    tracing::debug!(
                         target: "oink_gap",
                         holder_is_me = self.holder == self.me(),
                         leave_blocked = self.leave_blocked(),
@@ -511,7 +511,7 @@ impl Router {
                         let last = LAST_READY.load(std::sync::atomic::Ordering::Relaxed);
                         if now_us.saturating_sub(last) >= 1_000_000 {
                             LAST_READY.store(now_us, std::sync::atomic::Ordering::Relaxed);
-                            tracing::info!(
+                            tracing::debug!(
                                 target: "oink_gap",
                                 peer = ?target.id.device,
                                 portal_side = ?exit.side,
@@ -565,7 +565,7 @@ impl Router {
             let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
             if now_us.saturating_sub(last) >= 1_000_000 {
                 LAST.store(now_us, std::sync::atomic::Ordering::Relaxed);
-                tracing::info!(
+                tracing::debug!(
                     target: "oink_gap",
                     through_zone,
                     reachable_screens = screens.len(),

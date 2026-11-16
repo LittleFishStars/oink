@@ -176,7 +176,7 @@ impl InputBackend for LinuxInput {
                         let last_beat = LAST_BEAT.load(std::sync::atomic::Ordering::Relaxed);
                         if now_ms.saturating_sub(last_beat) >= 30_000 {
                             LAST_BEAT.store(now_ms, std::sync::atomic::Ordering::Relaxed);
-                            tracing::info!(
+                            tracing::debug!(
                                 target: "oink_gap",
                                 visible = found.len(),
                                 known = known.len(),

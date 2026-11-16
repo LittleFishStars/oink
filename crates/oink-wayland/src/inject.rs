@@ -11,7 +11,6 @@
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use wayland_client::protocol::wl_keyboard::KeyState;
 use wayland_client::protocol::wl_output::WlOutput;
