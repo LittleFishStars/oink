@@ -296,7 +296,9 @@ impl ClipboardBackend for LinuxClipboard {
             rep_mimes.insert(id, mime.to_string());
             representations.push(Representation {
                 id,
-                format: NativeFormat::Unknown(mime.to_string()),
+                // FormatId 要求 namespace:rest 形式；x11-mime 为自定义命名空间，
+                // 真正的跨平台语义由 portable_format(standard) 承载。
+                format: NativeFormat::Unknown(format!("x11-mime:{mime}")),
                 medium: Medium::Bytes,
                 aspect: 1,
                 index: -1,
