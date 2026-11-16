@@ -740,3 +740,10 @@ body:has(.oink-app:is([data-view="main"], [data-view="panel"])) { background: tr
 .oink-app[data-package-drag] .win__titlebar { z-index: 102; }
 .oink-app[data-package-drag] .win__cover-bar { left: 100px; right: auto; color: var(--ok-text-2); font-weight: 600; font-size: 14px; }
 .oink-app[data-package-drag][data-platform="win"] .win__cover-bar { left: 16px; }
+/* Linux(WebKitGTK) 主窗口不透明：透明合成在 WebKitGTK 上走慢速 readback 并拖慢
+   整个界面；这里用主题底色做不透明背景、去掉 CSS 阴影 gutter。 */
+.oink-app[data-view="main"][data-platform="linux"] { --main-gutter: 0px; background: var(--ok-bg); }
+.oink-app[data-view="main"][data-platform="linux"] > .win-shadow,
+.oink-app[data-view="panel"][data-platform="linux"] > .win-shadow { display: none; }
+body:has(.oink-app[data-view="main"][data-platform="linux"]),
+body:has(.oink-app[data-view="panel"][data-platform="linux"]) { background: var(--ok-bg); }

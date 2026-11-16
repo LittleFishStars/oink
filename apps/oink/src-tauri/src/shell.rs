@@ -318,23 +318,34 @@ fn create_normal(app: &AppHandle, view: View) -> tauri::Result<()> {
         };
         // The transparent gutter contains only the web silhouette's shadow.
         // Keep the actual product content at its original size/minimum.
-        let gutter = if view == View::Main { 24.0 } else { 0.0 };
+        // WebKitGTK 的透明窗口走慢速 readback 合成（且 Wayland 无系统阴影），
+        // Linux 主窗口直接不透明、无 gutter；macOS/Windows 用 CSS 阴影的透明 gutter。
+        let gutter = if cfg!(target_os = "linux") { 0.0 } else if view == View::Main { 24.0 } else { 0.0 };
         let builder = builder(app, view)
             .inner_size(width + gutter * 2.0, height + gutter * 2.0)
             .center()
             .visible(false)
             .focused(false);
         let builder = if view == View::Main {
-            builder
-                .min_inner_size(820.0 + gutter * 2.0, 560.0 + gutter * 2.0)
-                .visible(false)
-                // Tauri/Wry clears both the native backing and WebView backing
-                // (including WKWebView drawsBackground/underPageBackgroundColor).
-                // Disabling the system shadow avoids a rounded rectangle behind
-                // the CSS superellipse. About keeps its ordinary native frame.
-                .transparent(true)
-                .background_color(tauri::window::Color(0, 0, 0, 0))
-                .shadow(false)
+            if cfg!(target_os = "linux") {
+                // WebKitGTK 透明窗口走慢速 readback 合成、且 Wayland 无系统阴影，
+                // Linux 主窗口直接不透明，避免透明合成拖慢整个界面。
+                builder
+                    .min_inner_size(820.0 + gutter * 2.0, 560.0 + gutter * 2.0)
+                    .visible(false)
+                    .shadow(false)
+            } else {
+                builder
+                    .min_inner_size(820.0 + gutter * 2.0, 560.0 + gutter * 2.0)
+                    .visible(false)
+                    // Tauri/Wry clears both the native backing and WebView backing
+                    // (including WKWebView drawsBackground/underPageBackgroundColor).
+                    // Disabling the system shadow avoids a rounded rectangle behind
+                    // the CSS superellipse. About keeps its ordinary native frame.
+                    .transparent(true)
+                    .background_color(tauri::window::Color(0, 0, 0, 0))
+                    .shadow(false)
+            }
         } else {
             builder
                 .resizable(false)
