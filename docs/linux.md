@@ -55,6 +55,3 @@ RCH_SHIM_LOCAL_IDE=1 cargo build --release -p oink-agent -p oink-ui --features c
 ## 诊断
 
 - agent 日志：`~/.local/state/oink/Logs/oink.<日期>.log`（手动启动）或 `~/.local/share/oink/agent.log`（UI 自动拉起）。
-- 穿越各层打点：日志级别「调试」后 `grep oink_gap`。
-- evdev 对照：`python3 scripts/mouse-trace.py`（独立于 Oink 记录物理鼠标事件流）。
-- 卡顿/托盘取证：`bash scripts/linux-stall-trace.sh`。
