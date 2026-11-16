@@ -236,6 +236,31 @@ impl LinuxClipboard {
     fn receive_mime(&self, mime: &str) -> Option<Vec<u8>> {
         receive_mime_from(&self.wl, &self.state, mime)
     }
+
+    /// 把 mime→字节 的载荷发布为本机 selection（write 与 write_native_guarded 共用）。
+    fn publish_payload(&self, payload: HashMap<String, Vec<u8>>, sensitivity: Sensitivity) -> Result<u64, ClipboardError> {
+        let source = self
+            .wl
+            .with_globals(|g| g.dc_manager.clone())
+            .ok_or(ClipboardError::Unsupported)?
+            .create_data_source(&self.clip_qh, self.state.clone());
+        let mut mimes: Vec<&String> = payload.keys().collect();
+        mimes.sort();
+        for mime in &mimes {
+            source.offer((*mime).clone());
+        }
+        if sensitivity == Sensitivity::Concealed {
+            source.offer(MIME_CONCEALED.into());
+        }
+        // 先缓存内容再置 selection，避免 send 事件早于 pending 就绪。
+        *self.state.pending.lock().unwrap() = payload;
+        *self.state.own_write_until.lock().unwrap() = Some(Instant::now() + OWN_ECHO_WINDOW);
+        if let Some(device) = self.state.device.lock().unwrap().as_ref() {
+            device.set_selection(Some(&source));
+        }
+        self.wl.conn().flush().ok();
+        Ok(self.state.counter.fetch_add(1, Ordering::AcqRel) + 1)
+    }
 }
 
 impl ClipboardBackend for LinuxClipboard {
@@ -368,27 +393,58 @@ impl ClipboardBackend for LinuxClipboard {
         if payload.is_empty() {
             return Err(ClipboardError::Busy);
         }
-        let source = self
-            .wl
-            .with_globals(|g| g.dc_manager.clone())
-            .ok_or(ClipboardError::Unsupported)?
-            .create_data_source(&self.clip_qh, self.state.clone());
-        let mut mimes: Vec<&String> = payload.keys().collect();
-        mimes.sort();
-        for mime in &mimes {
-            source.offer((*mime).clone());
+        self.publish_payload(payload, sensitivity)
+    }
+
+    /// 接收端：把对端提供的 NativeSpec 写入本机 Wayland selection。
+    /// 远端字节经协议已归一化为 portable 标准格式（UTF-8 文本/HTML、PNG），
+    /// 这里按 standard 直接映射到本机 mime，从 contents provider 按需读出后发布。
+    fn write_native_guarded(
+        &self,
+        spec: crate::NativeSpec,
+        guard: crate::content::ReaderGuard,
+    ) -> Result<u64, ClipboardError> {
+        guard().map_err(|_| ClipboardError::Busy)?;
+        let mut payload: HashMap<String, Vec<u8>> = HashMap::new();
+        for item in &spec.inventory.items {
+            for rep in &item.representations {
+                if matches!(rep.data, RepresentationData::Unavailable(_)) {
+                    continue;
+                }
+                if rep.standard.is_none() {
+                    continue;
+                }
+                let mut reader = spec
+                    .contents
+                    .open(rep.id)
+                    .map_err(|e| ClipboardError::ContentUnavailable(content::reason(&e)))?;
+                let mut bytes = Vec::new();
+                reader
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| ClipboardError::ContentUnavailable(content::reason(&e)))?;
+                // 协议字节是 portable 标准格式，经 decode_standard 解码为 ClipData
+                // （Text/Html 校验 UTF-8，Png 原样），再映射回本机 mime。
+                let decoded = content::decode_standard(rep, &bytes)
+                    .map_err(|e| ClipboardError::ContentUnavailable(content::reason(&e)))?;
+                for data in decoded {
+                    let (mime, value) = match data {
+                        ClipData::Text(s) => (MIME_TEXT, s.into_bytes()),
+                        ClipData::Html(h) => (MIME_HTML, h.into_bytes()),
+                        ClipData::Png(p) => (MIME_PNG, p),
+                        _ => continue,
+                    };
+                    if !value.is_empty() {
+                        payload.insert(mime.to_string(), value);
+                    }
+                }
+            }
         }
-        if sensitivity == Sensitivity::Concealed {
-            source.offer(MIME_CONCEALED.into());
+        if payload.is_empty() {
+            return Err(ClipboardError::Unsupported);
         }
-        if let Some(device) = self.state.device.lock().unwrap().as_ref() {
-            device.set_selection(Some(&source));
-        }
-        self.wl.conn().flush().ok();
-        // 先缓存内容再置窗口，避免 send 早于 pending 就绪。
-        *self.state.pending.lock().unwrap() = payload;
-        *self.state.own_write_until.lock().unwrap() = Some(Instant::now() + OWN_ECHO_WINDOW);
-        Ok(self.state.counter.fetch_add(1, Ordering::AcqRel) + 1)
+        // 阻塞读取期间 selection 可能已变化，发布前再校验一次。
+        guard().map_err(|_| ClipboardError::Busy)?;
+        self.publish_payload(payload, spec.sensitivity)
     }
 
     fn watch(&self, on_change: ChangeHandler) -> Result<(), ClipboardError> {
