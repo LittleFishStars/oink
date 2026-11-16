@@ -238,12 +238,20 @@ impl LinuxClipboard {
     }
 
     /// 把 mime→字节 的载荷发布为本机 selection（write 与 write_native_guarded 共用）。
-    fn publish_payload(&self, payload: HashMap<String, Vec<u8>>, sensitivity: Sensitivity) -> Result<u64, ClipboardError> {
+    fn publish_payload(&self, mut payload: HashMap<String, Vec<u8>>, sensitivity: Sensitivity) -> Result<u64, ClipboardError> {
         let source = self
             .wl
             .with_globals(|g| g.dc_manager.clone())
             .ok_or(ClipboardError::Unsupported)?
             .create_data_source(&self.clip_qh, self.state.clone());
+        // GTK/Qt/终端等应用粘贴时常请求 UTF8_STRING / text/plain / STRING / TEXT，
+        // 而非 text/plain;charset=utf-8。为每个文本别名都 offer 并存同样字节，
+        // 否则应用请求别名时 send 取不到内容、粘贴为空。
+        if let Some(text) = payload.get(MIME_TEXT).cloned() {
+            for alias in ["UTF8_STRING", "STRING", "TEXT", "text/plain"] {
+                payload.entry(alias.into()).or_insert_with(|| text.clone());
+            }
+        }
         let mut mimes: Vec<&String> = payload.keys().collect();
         mimes.sort();
         for mime in &mimes {

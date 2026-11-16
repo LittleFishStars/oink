@@ -430,10 +430,15 @@ impl Task {
             .id()
             .and_then(oink_clipboard::wire::local_offer_id)
             .map_err(|_| E::Unsupported)?;
-        let target = if cfg!(target_os = "macos") {
-            oink_foundation::clipboard::ClipPlatform::Mac
-        } else {
+        // Linux 没有原生剪贴板重建契约（无 win-cf / mac-uti 命名空间），
+        // 必须像 macOS 那样走「异构 portable」路径：让 target != 源端 platform，
+        // 这样 selection() 选 portable_format、源端 open_for_demand 返回标准字节。
+        // 若沿用 Windows，Win 源会被判同源 → 走 native 协商(Unsupported)且返回
+        // UTF-16/CF_DIB 原生字节，接收端无法解码。用 Mac 复用其 portable 接收语义。
+        let target = if cfg!(windows) {
             oink_foundation::clipboard::ClipPlatform::Windows
+        } else {
+            oink_foundation::clipboard::ClipPlatform::Mac
         };
         let existing = self
             .shared
