@@ -426,10 +426,28 @@ impl ClipboardBackend for LinuxClipboard {
                 if rep.standard.is_none() {
                     continue;
                 }
-                let mut reader = spec.contents.open(rep.id).map_err(|e| {
-                    tracing::warn!(target: "oink_clip", ?rep, error = ?content::reason(&e), "apply: 远端表示读取失败");
-                    ClipboardError::ContentUnavailable(content::reason(&e))
-                })?;
+                // 跨端同步的写入完成会在源机触发新 capture，瞬态挤掉当前 offer
+                // 的读取（Superseded）。短暂重试让竞态窗口过去；若 offer 真被新
+                // 内容取代，重试仍失败且上层 may_write/guard 会终止，不会错写旧数据。
+                let mut reader = None;
+                for attempt in 0..3 {
+                    match spec.contents.open(rep.id) {
+                        Ok(r) => {
+                            reader = Some(r);
+                            break;
+                        }
+                        Err(e) => {
+                            let reason = content::reason(&e);
+                            let superseded = reason == Unavailable::Superseded;
+                            tracing::warn!(target: "oink_clip", rep_id = rep.id.0, ?reason, attempt, "apply: 远端表示读取失败");
+                            if !superseded || attempt == 2 {
+                                return Err(ClipboardError::ContentUnavailable(reason));
+                            }
+                            std::thread::sleep(Duration::from_millis(150));
+                        }
+                    }
+                }
+                let mut reader = reader.ok_or_else(|| ClipboardError::ContentUnavailable(Unavailable::Superseded))?;
                 let mut bytes = Vec::new();
                 reader
                     .read_to_end(&mut bytes)
