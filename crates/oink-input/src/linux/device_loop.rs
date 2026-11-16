@@ -91,7 +91,11 @@ pub fn device_thread(
             match ev.event_type() {
                 evdev::EventType::KEY if remote_now => {
                     let code = ev.code();
-                    let pressed = ev.value() == 1; // 0=抬起 1=按下 2=自动重复
+                    // evdev KEY value: 0=抬起 1=按下 2=自动重复。
+                    // 重复的语义是「仍处于按下」，绝不能当成抬起——否则按住修饰键
+                    // 期间的内核重复会让对端提前 KEYUP，组合键（Ctrl+C 等）失效。
+                    // router 的 capture_reports_key_repeat=true 也要求重复按按下上报。
+                    let pressed = ev.value() != 0;
                     if let Some(button) = button_from_evdev(code) {
                         frame.push(InputEvent::Button { button, pressed });
                     } else if let Some(key) = oink_wayland::keymap::evdev_to_hid(u32::from(code)) {
