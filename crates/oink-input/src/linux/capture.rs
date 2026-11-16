@@ -31,19 +31,19 @@ pub enum DeviceKind {
     Touchpad,
 }
 
-/// 由设备能力判定角色。规则与 libinput/桌面惯例一致：
-/// 有 REL_X 的指针设备是鼠标；多点 + POINTER 属性的是触摸板；
-/// 能输出大量字母键且不是指针设备的是键盘。
+/// 由设备能力判定角色。用能力矩阵（与 libinput 同思路）而非可选的
+/// INPUT_PROP_POINTER 属性——蓝牙/复合 HID 鼠标经常不声明该属性，
+/// 依赖它会把整只蓝牙鼠标从捕获列表里过滤掉（实测 HUAWEI Mouse）。
 pub fn classify(supports: &DeviceCaps) -> Option<DeviceKind> {
-    if supports.is_pointer {
-        if supports.relative_xy {
-            return Some(DeviceKind::Mouse);
-        }
-        if supports.touch_multi {
-            return Some(DeviceKind::Touchpad);
-        }
+    if supports.touch_multi {
+        // 多点绝对（ABS_MT）+ BTN_TOUCH = 触摸板/触摸屏。
+        return Some(DeviceKind::Touchpad);
     }
-    if supports.alphabet && !supports.relative_xy && !supports.touch_multi {
+    if supports.relative_xy && supports.mouse_button {
+        // REL_X/Y + BTN_LEFT = 鼠标（含蓝牙、2.4G、PS/2 兼容口）。
+        return Some(DeviceKind::Mouse);
+    }
+    if supports.alphabet && !supports.relative_xy {
         return Some(DeviceKind::Keyboard);
     }
     None
@@ -57,6 +57,7 @@ pub struct DeviceCaps {
     pub touch_multi: bool,
     pub alphabet: bool,
     pub scroll_wheel: bool,
+    pub mouse_button: bool,
 }
 
 /// evdev BTN_* → oink 鼠标键。
@@ -251,6 +252,7 @@ fn caps_of(device: &evdev::Device) -> DeviceCaps {
     }
     if let Some(keys) = device.supported_keys() {
         caps.alphabet = keys.contains(K::KEY_A) && keys.contains(K::KEY_Z) && keys.contains(K::KEY_ENTER);
+        caps.mouse_button = keys.contains(K::BTN_LEFT);
     }
     caps
 }
@@ -319,9 +321,18 @@ mod tests {
     fn classifies_keyboard_mouse_touchpad() {
         let keyboard = DeviceCaps { alphabet: true, ..Default::default() };
         assert_eq!(classify(&keyboard), Some(DeviceKind::Keyboard));
+        // 蓝牙/复合 HID 鼠标不声明 POINTER 属性——能力矩阵必须仍能分类。
+        let bt_mouse = DeviceCaps {
+            relative_xy: true,
+            mouse_button: true,
+            scroll_wheel: true,
+            ..Default::default()
+        };
+        assert_eq!(classify(&bt_mouse), Some(DeviceKind::Mouse));
         let mouse = DeviceCaps {
             is_pointer: true,
             relative_xy: true,
+            mouse_button: true,
             scroll_wheel: true,
             ..Default::default()
         };
