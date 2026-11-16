@@ -34,6 +34,16 @@ use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_source_v1
 };
 
 use crate::{ChangeHandler, ClipboardBackend, ClipboardError, ClipSnapshot};
+use crate::content::{self, Provider, Translator};
+use crate::model::{
+    ContentItem, ContentSize, Inventory, ItemId, Medium, NativeFormat, REPRESENTATION_BYTES, Representation,
+    RepresentationData, RepresentationId, StandardFormat, Unavailable,
+};
+use crate::{CapturedClipboard, FileReader};
+use oink_foundation::DeviceId;
+use oink_foundation::content::{ClipId, OfferId};
+use oink_foundation::clipboard::ClipPlatform;
+use std::io::Cursor;
 
 const MIME_TEXT: &str = "text/plain;charset=utf-8";
 const MIME_HTML: &str = "text/html";
@@ -82,6 +92,76 @@ pub struct LinuxClipboard {
     state: Arc<RealState>,
     pump_done: Arc<AtomicBool>,
     pump: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+/// 把 Wayland selection 的原生 mime 字节翻译成标准 ClipData。
+/// 与 macOS/Windows translator 对称：同一平台的接收端不会调用它，
+/// 只有发往异构平台的表示才按 standard 语义解码。
+struct LinuxTranslator;
+impl Translator for LinuxTranslator {
+    fn standard(&self, rep: &Representation, bytes: &[u8]) -> std::io::Result<Vec<crate::ClipData>> {
+        use crate::ClipData;
+        let value = match rep.standard {
+            Some(StandardFormat::Text) => {
+                let text = String::from_utf8_lossy(bytes).into_owned();
+                ClipData::Text(text)
+            }
+            Some(StandardFormat::Html) => {
+                let text = String::from_utf8_lossy(bytes).into_owned();
+                ClipData::Html(text)
+            }
+            Some(StandardFormat::Png) => ClipData::Png(bytes.to_vec()),
+            _ => return Err(content::unavailable(Unavailable::Unsupported)),
+        };
+        Ok(vec![value])
+    }
+}
+
+/// 当前 selection 的按需读取 provider。Wayland data_control 的 offer 在
+/// selection 不变期间可多次 receive；变化由 check 闭包（change_count）发现。
+struct LinuxClipProvider {
+    wl: Arc<Wayland>,
+    state: Arc<RealState>,
+    inventory: Inventory,
+    /// representation id → mime，open 时据此 receive_mime。
+    mimes: HashMap<RepresentationId, String>,
+}
+impl Provider for LinuxClipProvider {
+    fn inventory(&self) -> Inventory {
+        self.inventory.clone()
+    }
+    fn open(&self, id: RepresentationId) -> std::io::Result<FileReader> {
+        let mime = self.mimes.get(&id).ok_or_else(|| content::unavailable(Unavailable::NoSuchItem))?;
+        let bytes = receive_mime_from(&self.wl, &self.state, mime)
+            .ok_or_else(|| content::unavailable(Unavailable::ReadFailed))?;
+        if bytes.len() as u64 > REPRESENTATION_BYTES {
+            return Err(content::unavailable(Unavailable::LimitExceeded));
+        }
+        Ok(Box::new(Cursor::new(bytes)))
+    }
+    fn translator(&self) -> Arc<dyn Translator> {
+        Arc::new(LinuxTranslator)
+    }
+}
+
+/// 读一个 mime 的全部内容（receive + 阻塞读 EOF）。独立成自由函数，
+/// 供后端 read() 与按需读取 provider 共用同一份 offer 读取逻辑。
+fn receive_mime_from(wl: &Wayland, state: &RealState, mime: &str) -> Option<Vec<u8>> {
+    let proxy = state.offer.lock().unwrap().clone()?;
+    if !state.mimes.lock().unwrap().iter().any(|m| m == mime) {
+        return None;
+    }
+    let (read_fd, write_fd) = rustix::pipe::pipe().ok()?;
+    proxy.receive(mime.to_string(), write_fd.as_fd());
+    drop(write_fd); // 合成器写完关闭写端后读端见 EOF
+    wl.conn().flush().ok();
+    let mut file = std::fs::File::from(read_fd);
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).ok()?;
+    if buf.is_empty() {
+        return None;
+    }
+    Some(buf)
 }
 
 
@@ -154,21 +234,7 @@ impl LinuxClipboard {
 
     /// 读一个 mime 的全部内容（receive + 阻塞读 EOF）。
     fn receive_mime(&self, mime: &str) -> Option<Vec<u8>> {
-        let proxy = self.state.offer.lock().unwrap().clone()?;
-        if !self.state.mimes.lock().unwrap().iter().any(|m| m == mime) {
-            return None;
-        }
-        let (read_fd, write_fd) = rustix::pipe::pipe().ok()?;
-        proxy.receive(mime.to_string(), write_fd.as_fd());
-        drop(write_fd); // 合成器写完关闭写端后读端见 EOF
-        self.wl.conn().flush().ok();
-        let mut file = std::fs::File::from(read_fd);
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf).ok()?;
-        if buf.is_empty() {
-            return None;
-        }
-        Some(buf)
+        receive_mime_from(&self.wl, &self.state, mime)
     }
 }
 
@@ -200,6 +266,82 @@ impl ClipboardBackend for LinuxClipboard {
             items,
             sensitivity: if concealed { Sensitivity::Concealed } else { Sensitivity::Normal },
             change_count,
+        })
+    }
+
+    /// Native capture: build an on-demand provider over the current selection so
+    /// the agent can publish an offer to peers. Without this override the trait's
+    /// default returns `content: None`, which makes the agent drop the offer and
+    /// Linux→Windows clipboard sharing silently do nothing.
+    fn capture(&self, _data: &std::path::Path) -> Result<CapturedClipboard, ClipboardError> {
+        let count = self.change_count();
+        let mimes = self.state.mimes.lock().unwrap().clone();
+        let concealed = mimes.iter().any(|m| m == MIME_CONCEALED);
+
+        // 只声明当前 offer 里确实存在、且我们支持按需读取的 mime。
+        let supported: [(&str, StandardFormat); 3] = [
+            (MIME_TEXT, StandardFormat::Text),
+            (MIME_HTML, StandardFormat::Html),
+            (MIME_PNG, StandardFormat::Png),
+        ];
+        let mut rep_id = 0u32;
+        let mut rep_mimes: HashMap<RepresentationId, String> = HashMap::new();
+        let mut representations = Vec::new();
+        for (mime, standard) in supported {
+            if !mimes.iter().any(|m| m == mime) {
+                continue;
+            }
+            rep_id += 1;
+            let id = RepresentationId(rep_id);
+            rep_mimes.insert(id, mime.to_string());
+            representations.push(Representation {
+                id,
+                format: NativeFormat::Unknown(mime.to_string()),
+                medium: Medium::Bytes,
+                aspect: 1,
+                index: -1,
+                standard: Some(standard),
+                data: RepresentationData::Reader { size: ContentSize::Unknown },
+            });
+        }
+        if representations.is_empty() {
+            return Err(ClipboardError::Unsupported);
+        }
+        let inventory = Inventory {
+            id: OfferId {
+                clip: ClipId { origin: DeviceId([0; 32]), seq: 0 },
+                generation: count,
+            },
+            platform: ClipPlatform::Unknown,
+            items: vec![ContentItem {
+                id: ItemId(0),
+                virtual_files: false,
+                file: None,
+                representations,
+            }],
+            roots: Vec::new(),
+        };
+        inventory.validate().map_err(ClipboardError::ContentUnavailable)?;
+
+        let provider = LinuxClipProvider {
+            wl: self.wl.clone(),
+            state: self.state.clone(),
+            inventory,
+            mimes: rep_mimes,
+        };
+        let snapshot = ClipSnapshot {
+            items: content::items(&provider.inventory()),
+            sensitivity: if concealed { Sensitivity::Concealed } else { Sensitivity::Normal },
+            change_count: count,
+        };
+        // 与 macOS/Windows 对齐：capture 期间 selection 若变化则放弃，
+        // 避免把过期 offer 当作当前内容发布。
+        if self.change_count() != count {
+            return Err(ClipboardError::Busy);
+        }
+        Ok(CapturedClipboard {
+            snapshot,
+            content: Some(Arc::new(provider)),
         })
     }
 
