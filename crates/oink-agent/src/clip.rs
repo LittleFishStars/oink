@@ -693,13 +693,16 @@ impl Task {
                     }
                 }
                 Err(_) if publication.provider_unavailable => {}
-                Err(error) => self.record(
-                    id.origin,
-                    &publication.inventory,
-                    ClipOutcome::Failed {
-                        message: error.to_string(),
-                    },
-                ),
+                Err(error) => {
+                    tracing::warn!(target: "oink_clip", %error, from = ?id.origin, "apply: 本机剪贴板写入失败");
+                    self.record(
+                        id.origin,
+                        &publication.inventory,
+                        ClipOutcome::Failed {
+                            message: error.to_string(),
+                        },
+                    );
+                }
             }
         }
         if publication.provider_unavailable && ticket.valid.load(Ordering::Acquire) && self.may_write(id) {

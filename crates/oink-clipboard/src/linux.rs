@@ -412,7 +412,11 @@ impl ClipboardBackend for LinuxClipboard {
         spec: crate::NativeSpec,
         guard: crate::content::ReaderGuard,
     ) -> Result<u64, ClipboardError> {
-        guard().map_err(|_| ClipboardError::Busy)?;
+        tracing::info!(target: "oink_clip", items = spec.inventory.items.len(), "apply: 开始写入本机 selection");
+        if guard().is_err() {
+            tracing::warn!(target: "oink_clip", "apply: guard 前置校验失败（ticket 失效/策略关闭/本机 selection 已变化）");
+            return Err(ClipboardError::Busy);
+        }
         let mut payload: HashMap<String, Vec<u8>> = HashMap::new();
         for item in &spec.inventory.items {
             for rep in &item.representations {
@@ -422,18 +426,20 @@ impl ClipboardBackend for LinuxClipboard {
                 if rep.standard.is_none() {
                     continue;
                 }
-                let mut reader = spec
-                    .contents
-                    .open(rep.id)
-                    .map_err(|e| ClipboardError::ContentUnavailable(content::reason(&e)))?;
+                let mut reader = spec.contents.open(rep.id).map_err(|e| {
+                    tracing::warn!(target: "oink_clip", ?rep, error = ?content::reason(&e), "apply: 远端表示读取失败");
+                    ClipboardError::ContentUnavailable(content::reason(&e))
+                })?;
                 let mut bytes = Vec::new();
                 reader
                     .read_to_end(&mut bytes)
                     .map_err(|e| ClipboardError::ContentUnavailable(content::reason(&e)))?;
                 // 协议字节是 portable 标准格式，经 decode_standard 解码为 ClipData
                 // （Text/Html 校验 UTF-8，Png 原样），再映射回本机 mime。
-                let decoded = content::decode_standard(rep, &bytes)
-                    .map_err(|e| ClipboardError::ContentUnavailable(content::reason(&e)))?;
+                let decoded = content::decode_standard(rep, &bytes).map_err(|e| {
+                    tracing::warn!(target: "oink_clip", rep_id = rep.id.0, standard = ?rep.standard, bytes = bytes.len(), error = ?content::reason(&e), "apply: portable 解码失败");
+                    ClipboardError::ContentUnavailable(content::reason(&e))
+                })?;
                 for data in decoded {
                     let (mime, value) = match data {
                         ClipData::Text(s) => (MIME_TEXT, s.into_bytes()),
@@ -448,10 +454,16 @@ impl ClipboardBackend for LinuxClipboard {
             }
         }
         if payload.is_empty() {
+            tracing::warn!(target: "oink_clip", "apply: 所有表示均解码为空，无可写入内容");
             return Err(ClipboardError::Unsupported);
         }
         // 阻塞读取期间 selection 可能已变化，发布前再校验一次。
-        guard().map_err(|_| ClipboardError::Busy)?;
+        if guard().is_err() {
+            tracing::warn!(target: "oink_clip", "apply: 读取后 guard 校验失败（读取期间本机 selection 变化/取消）");
+            return Err(ClipboardError::Busy);
+        }
+        let summary: Vec<String> = payload.iter().map(|(m, b)| format!("{m}:{}B", b.len())).collect();
+        tracing::info!(target: "oink_clip", payload = ?summary, "apply: 解码完成，发布 selection");
         self.publish_payload(payload, spec.sensitivity)
     }
 
@@ -546,7 +558,11 @@ impl Dispatch<ZwlrDataControlDeviceV1, Arc<RealState>> for ClipClient {
                             .unwrap_or_default();
                         *state.mimes.lock().unwrap() = mimes;
                         *state.offer.lock().unwrap() = Some(offer);
-                        if !state.own_echo() {
+                        if state.own_echo() {
+                            tracing::debug!(target: "oink_clip", "selection 回显抑制（own_echo 窗口内）");
+                        } else {
+                            let n = state.counter.load(Ordering::Acquire) + 1;
+                            tracing::info!(target: "oink_clip", counter = n, "selection 外来变化 bump");
                             state.bump();
                         }
                     }
