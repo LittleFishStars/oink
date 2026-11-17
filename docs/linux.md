@@ -14,7 +14,8 @@ Oink 的 Linux 支持（niri + Wayland）在 `linux-niri` 分支上开发。本�
 | 组合键转发 | ✅ | evdev 自动重复(value=2)按「仍按下」上报，避免修饰键被提前释放 |
 | 文件拖拽（DnD） | ❌ | Linux DnD 后端为 Unsupported（platform_dnd） |
 | 音频播放（对端→本机） | ✅ | cpal ALSA host 输出，48k/stereo/f32 |
-| 系统音频捕获 / 虚拟麦克风 | ❌ | 需 PulseAudio/PipeWire monitor；mute 无法等价实现，暂未移植 |
+| 系统音频捕获 | ✅ | pactl null sink 路由（转发时物理扬声器静音）+ parec 从 monitor 读 48k/stereo/f32，需 pulseaudio-utils/pipewire-pulse |
+| 虚拟麦克风 | ❌ | 需创建虚拟音频设备，暂未移植 |
 | 开机自启 / 自动更新 | ❌ | UnsupportedPlatform / OsUnsupported |
 
 ## 源机捕获（本机控制其他设备）

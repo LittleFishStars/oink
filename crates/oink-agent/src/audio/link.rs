@@ -602,7 +602,7 @@ impl Owner {
         let (recovered, recovery_error): (Option<oink_audio::recovery::RecoveryReport>, Option<String>) = (None, None);
         let recovery_error = startup_recovery_error(&directory, recovery_error);
         let platform: Arc<dyn AudioPlatform> = Arc::new(SystemAudio {
-            #[cfg(any(windows, target_os = "macos"))]
+            #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
             recovery_dir: directory.clone(),
         });
         #[cfg(any(test, debug_assertions))]

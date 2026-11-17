@@ -49,6 +49,10 @@ mod windows;
 mod windows_playback;
 #[cfg(target_os = "linux")]
 mod linux_playback;
+#[cfg(target_os = "linux")]
+mod linux_capture;
+#[cfg(target_os = "linux")]
+pub use linux_capture::Capture;
 #[cfg(windows)]
 pub(crate) mod windows_timer;
 #[cfg(target_os = "macos")]
@@ -259,14 +263,16 @@ pub fn capture_capability() -> &'static str {
         "core_audio_tap_14_2"
     } else if cfg!(windows) {
         "wasapi_endpoint_loopback_journaled_mute_driver_dependent"
+    } else if cfg!(target_os = "linux") {
+        "pipewire-pulse-null-sink-monitor"
     } else {
         "unsupported"
     }
 }
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 #[derive(Debug)]
 pub struct Capture;
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 impl Capture {
     pub fn set_forwarding_pause(&self, _: Option<media_pause::ForwardingPause>) {}
     pub fn info(&self) -> CaptureInfo {
