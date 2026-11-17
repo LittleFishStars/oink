@@ -608,7 +608,13 @@ impl Router {
             let classify = native
                 && (self.cfg.settings.mac_scroll_feel || native_scroll_only)
                 && self.peers.get(&origin).is_some_and(|p| p.os == Os::MacOS);
-            let path = if !native {
+            // 只有 macOS 源同时发 TouchpadSample/Contacts，能在 Native path 下
+            // 走原生触点注入。Linux 等其它源只发 Gesture：Native path 会过滤掉
+            // Gesture 且无 contacts 可注入 → 手势全丢。强制这类源的手势走
+            // Gestures path（快捷键映射），不影响 Scroll/Contacts 的既有判定。
+            let gesture_without_native_contacts = matches!(event, MultiEvent::Gesture(_))
+                && self.peers.get(&origin).is_some_and(|p| p.os != Os::MacOS);
+            let path = if !native || gesture_without_native_contacts {
                 MultiPath::Gestures
             } else if classify {
                 match event {

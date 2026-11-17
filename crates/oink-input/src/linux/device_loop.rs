@@ -14,14 +14,6 @@ use super::capture::{
 /// 回调：设备线程在事件组装完后同步调用（与 `EventHandler` 一致的形态）。
 pub type Sink = Arc<dyn Fn(&CapturedEvent) + Send + Sync>;
 
-/// Stable nonzero device tag from its /dev/input path (for contact samples).
-fn path_id(path: &std::path::Path) -> u32 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut hasher);
-    (hasher.finish() as u32).max(1)
-}
-
 /// 每个设备的处理线程。Local 时只观察光标位移（不 grab、不上报）；
 /// Remote 时 grab 设备并上报全部事件。
 pub fn device_thread(
@@ -45,9 +37,6 @@ pub fn device_thread(
     let mut asm = EventAssembler::default();
     // 多指手势识别（仅触摸板用到；真鼠标/键盘不产生 ABS_MT）。
     let mut gesture = crate::linux::gesture::GestureRecognizer::default();
-    // 触点前导：接收端（Windows）按是否有 contacts 决定手势注入路径；
-    // 只有 Gesture 没有 contacts 时会被 Native path 过滤掉。
-    let mut last_fingers = 0usize;
     let mut frame = Vec::new();
     let control = shared.control.clone();
     let ledger = shared.ledger.clone();
@@ -184,21 +173,6 @@ pub fn device_thread(
                         crate::linux::gesture::Outcome::Events(events) => gesture_events = events,
                         crate::linux::gesture::Outcome::PassThrough => {}
                     }
-                    // 触点前导：0→有手指时发一次 Boundary，随后每帧发 Sample。
-                    // 这让 Windows 接收端走对手势注入路径（见 contacts.rs filter_multifinger）。
-                    if remote_now {
-                        if last_fingers == 0 && fingers > 0 {
-                            frame.push(InputEvent::TouchpadBoundary);
-                        }
-                        if fingers > 0 {
-                            if let Some(sample) = crate::linux::gesture::contact_sample(
-                                path_id(&path), &asm.fingers, ledger.time_us(Instant::now()),
-                            ) {
-                                frame.push(InputEvent::TouchpadSample(sample));
-                            }
-                        }
-                    }
-                    last_fingers = fingers;
                     // 手势只在控制对端（remote）时转发；本机自用时不发，
                     // 避免把用户本地的触摸板手势变成远端动作。
                     if remote_now {
