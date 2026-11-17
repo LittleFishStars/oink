@@ -260,7 +260,7 @@ fn caps_of(device: &evdev::Device) -> DeviceCaps {
 /// 设备线程的事件缓冲：把 evdev 的 EV_KEY/EV_RELATIVE/EV_ABS 组装成上报事件。
 #[derive(Default)]
 pub struct EventAssembler {
-    /// 触摸板 slot → 上一个坐标。
+    /// 触摸板 slot → 上一个坐标（单指/兼容差分用）。
     pub slots: BTreeMap<i32, (f64, f64)>,
     pub slot: i32,
     /// 触摸板当前 slot 的本次 ABS_MT 更新（SYN 时与 `slots` 差分）。
@@ -271,6 +271,79 @@ pub struct EventAssembler {
     pub dy: f64,
     pub wheel: f64,
     pub hwheel: f64,
+    /// 多指跟踪：slot → ABS_MT_TRACKING_ID（-1 表示该 slot 抬起）。
+    pub tracking: BTreeMap<i32, i32>,
+    /// 多指跟踪：slot → 本帧最新坐标（仅活跃手指）。
+    pub fingers: BTreeMap<i32, (f64, f64)>,
+    /// 本帧更新的 slot 坐标缓冲（SYN 时合并进 fingers）。
+    pub pending_x: BTreeMap<i32, f64>,
+    pub pending_y: BTreeMap<i32, f64>,
+    /// 本帧 tracking_id 变动（-1=抬起，>=0=新增）。
+    pub tracking_changes: Vec<(i32, i32)>,
+}
+
+impl EventAssembler {
+    /// 当前活跃手指数。
+    pub fn finger_count(&self) -> usize {
+        self.fingers.len()
+    }
+
+    /// 活跃手指质心；无手指时 None。
+    pub fn centroid(&self) -> Option<(f64, f64)> {
+        if self.fingers.is_empty() {
+            return None;
+        }
+        let n = self.fingers.len() as f64;
+        let (sx, sy) = self
+            .fingers
+            .values()
+            .fold((0.0, 0.0), |(ax, ay), (x, y)| (ax + x, ay + y));
+        Some((sx / n, sy / n))
+    }
+
+    /// 两指平均间距（捏合识别用）；不足两指时 None。
+    pub fn pinch_distance(&self) -> Option<f64> {
+        if self.fingers.len() < 2 {
+            return None;
+        }
+        let pts: Vec<_> = self.fingers.values().collect();
+        let mut total = 0.0;
+        let mut pairs = 0;
+        for i in 0..pts.len() {
+            for j in (i + 1)..pts.len() {
+                let (x1, y1) = pts[i];
+                let (x2, y2) = pts[j];
+                total += ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
+                pairs += 1;
+            }
+        }
+        (pairs > 0).then(|| total / pairs as f64)
+    }
+
+    /// 把本帧 pending 坐标合并进 fingers，并清理已抬起的手指。
+    pub fn commit_fingers(&mut self) {
+        for (slot, id) in self.tracking_changes.drain(..) {
+            if id < 0 {
+                self.tracking.remove(&slot);
+                self.fingers.remove(&slot);
+                self.pending_x.remove(&slot);
+                self.pending_y.remove(&slot);
+            } else {
+                self.tracking.insert(slot, id);
+            }
+        }
+        let slots: Vec<i32> = self.pending_x.keys().copied().collect();
+        for slot in slots {
+            let x = self.pending_x.remove(&slot);
+            let y = self.pending_y.remove(&slot);
+            if let (Some(x), Some(y)) = (x, y)
+                && self.tracking.get(&slot).is_some_and(|id| *id >= 0)
+            {
+                self.fingers.insert(slot, (x, y));
+            }
+        }
+        self.pending_y.clear();
+    }
 }
 
 impl EventAssembler {

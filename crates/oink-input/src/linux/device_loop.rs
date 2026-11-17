@@ -35,6 +35,8 @@ pub fn device_thread(
     }
     let mut grabbed = false;
     let mut asm = EventAssembler::default();
+    // 多指手势识别（仅触摸板用到；真鼠标/键盘不产生 ABS_MT）。
+    let mut gesture = crate::linux::gesture::GestureRecognizer::default();
     let mut frame = Vec::new();
     let control = shared.control.clone();
     let ledger = shared.ledger.clone();
@@ -117,10 +119,18 @@ pub fn device_thread(
                     match ev.code() {
                         c if c == evdev::AbsoluteAxisCode::ABS_MT_SLOT.0 => asm.slot = ev.value(),
                         c if c == evdev::AbsoluteAxisCode::ABS_MT_POSITION_X.0 => {
-                            asm.abs_x = Some(f64::from(ev.value()));
+                            let x = f64::from(ev.value());
+                            asm.abs_x = Some(x);
+                            asm.pending_x.insert(asm.slot, x);
                         }
                         c if c == evdev::AbsoluteAxisCode::ABS_MT_POSITION_Y.0 => {
-                            asm.abs_y = Some(f64::from(ev.value()));
+                            let y = f64::from(ev.value());
+                            asm.abs_y = Some(y);
+                            asm.pending_y.insert(asm.slot, y);
+                        }
+                        // TRACKING_ID 是手指身份：-1 表示该 slot 抬起，>=0 是新增。
+                        c if c == evdev::AbsoluteAxisCode::ABS_MT_TRACKING_ID.0 => {
+                            asm.tracking_changes.push((asm.slot, ev.value()));
                         }
                         _ => {}
                     }
@@ -138,8 +148,32 @@ pub fn device_thread(
                     }
                 }
                 evdev::EventType::SYNCHRONIZATION => {
-                    // 一帧结束：先结算触摸板 ABS 差分，再统一上报。
-                    asm.absorb_abs_motion(speed);
+                    // 一帧结束：先结算多指状态，再处理手势或普通位移。
+                    asm.commit_fingers();
+                    let fingers = asm.finger_count();
+                    let centroid = asm.centroid();
+                    let distance = asm.pinch_distance();
+                    let outcome = gesture.update(fingers, centroid, distance);
+                    let mut gesture_events = Vec::new();
+                    let gesture_active = gesture.active();
+                    match outcome {
+                        crate::linux::gesture::Outcome::Events(events) => gesture_events = events,
+                        crate::linux::gesture::Outcome::PassThrough => {}
+                    }
+                    // 手势只在控制对端（remote）时转发；本机自用时不发，
+                    // 避免把用户本地的触摸板手势变成远端动作。
+                    if remote_now {
+                        for g in gesture_events {
+                            frame.push(InputEvent::Gesture(g));
+                        }
+                    }
+                    // 手势进行中时，这一帧的位移属于手势，不再移动光标。
+                    if !(gesture_active && remote_now) {
+                        asm.absorb_abs_motion(speed);
+                    } else {
+                        asm.abs_x = None;
+                        asm.abs_y = None;
+                    }
                     if asm.dx != 0.0 || asm.dy != 0.0 {
                         let pos = ledger.advance(asm.dx, asm.dy);
                         // PointerDelta 是路由的正常移动通道：Local（本机作为源机

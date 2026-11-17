@@ -16,6 +16,7 @@ Oink 的 Linux 支持（niri + Wayland）在 `linux-niri` 分支上开发。本�
 | 音频播放（对端→本机） | ✅ | cpal ALSA host 输出，48k/stereo/f32 |
 | 系统音频捕获 | ✅ | pactl null sink 路由（转发时物理扬声器静音）+ parec 从 monitor 读 48k/stereo/f32，需 pulseaudio-utils/pipewire-pulse |
 | 虚拟麦克风 | ✅ | pactl 建 null sink + remap-source（`oink_mic`），对端麦克风音频经 pacat 写入；demand 用 source-outputs 轮询；需 pulseaudio-utils/pipewire-pulse |
+| 触控板手势 | ✅ | evdev ABS_MT_TRACKING_ID 多指跟踪 + 质心/间距识别：两指横扫/竖扫 → DockSwipe，两指捏合 → Magnify；仅在控制对端(remote)时转发 |
 | 开机自启 / 自动更新 | ❌ | UnsupportedPlatform / OsUnsupported |
 
 ## 源机捕获（本机控制其他设备）
@@ -24,6 +25,12 @@ Oink 的 Linux 支持（niri + Wayland）在 `linux-niri` 分支上开发。本�
 - evdev 热插拔：每 2 秒扫描 `/dev/input`，新设备节点自动接入（蓝牙鼠标断连重连后 ≤2s 恢复）。
 - 触摸板上报 `ABS_MT_POSITION_*` 绝对坐标，按 slot 差分为相对位移；`BTN_TOUCH` 抬起重锚定。
 - 已知限制：蓝牙 HID 由 bluez 空闲断连，重连期 1~2 秒的移动事件天然丢失（协议层无法避免）。
+- 多指手势：按 `ABS_MT_TRACKING_ID` 跟踪每根手指（-1=抬起），SYN 时算活跃手指数、质心与
+  两指平均间距。质心位移或间距变化任一越过 slop（60 单位）即确认手势：
+  - 两指横扫/竖扫 → `Gesture::DockSwipe`（progress 以 420 单位为一整次）；
+  - 两指捏合 → `Gesture::Magnify`（260 单位距离变化 ≈ 0.1 放大量）。
+  手势仅在控制对端（remote）时转发，本机自用不产生远端动作；手势进行中的位移不再移动光标。
+  Windows 目标会把手势映射为快捷键（任务视图/切换桌面/显示桌面）。
 
 ## 穿越（Linux 作为源机）
 

@@ -11,6 +11,7 @@
 
 mod capture;
 mod device_loop;
+mod gesture;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
