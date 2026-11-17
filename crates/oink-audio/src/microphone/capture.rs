@@ -59,6 +59,10 @@ pub fn virtual_output() -> Result<VirtualOutput, String> {
             None => VirtualOutput::Missing,
         })
     }
+    #[cfg(target_os = "linux")]
+    {
+        super::linux::virtual_output()
+    }
     #[cfg(windows)]
     {
         let mut matches = Vec::new();
@@ -141,6 +145,8 @@ impl Capture {
             device: device_info,
             backend: if cfg!(windows) {
                 "wasapi_shared"
+            } else if cfg!(target_os = "linux") {
+                "cpal_alsa_input"
             } else {
                 "coreaudio_input"
             },
@@ -284,6 +290,36 @@ where
 pub fn input_candidates() -> Result<Vec<InputCandidate>, String> {
     #[cfg(target_os = "macos")]
     return crate::macos_devices::input_candidates();
+    #[cfg(target_os = "linux")]
+    return Ok(cpal::default_host()
+        .input_devices()
+        .map_err(|e| e.to_string())?
+        .filter_map(|device| {
+            let description = device.description().ok()?;
+            let interface = description.interface_type();
+            let physical = matches!(
+                interface,
+                cpal::InterfaceType::BuiltIn
+                    | cpal::InterfaceType::Usb
+                    | cpal::InterfaceType::Bluetooth
+                    | cpal::InterfaceType::Pci
+                    | cpal::InterfaceType::FireWire
+                    | cpal::InterfaceType::Thunderbolt
+                    | cpal::InterfaceType::Line
+            );
+            let input = descriptor(&device).ok()?;
+            // 排除我们自己的虚拟 mic source（回环设备不能当麦克风源）
+            if input.id.contains("oink_mic") || input.name.contains("Oink Microphone") {
+                return None;
+            }
+            Some(InputCandidate {
+                input,
+                physical,
+                built_in: interface == cpal::InterfaceType::BuiltIn,
+                forwarding_loopback: false,
+            })
+        })
+        .collect());
     #[cfg(windows)]
     cpal::default_host()
         .input_devices()
@@ -352,5 +388,19 @@ pub fn switch_default_input(expected: &str, replacement: &str) -> Result<(), Str
         Ok(())
     }
     #[cfg(windows)]
-    super::windows::switch_default_input(expected, replacement)
+    {
+        super::windows::switch_default_input(expected, replacement)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let out = std::process::Command::new("pactl")
+            .args(["set-default-source", replacement])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    }
 }

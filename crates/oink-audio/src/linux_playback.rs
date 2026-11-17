@@ -73,6 +73,9 @@ fn frames_of(config: &StreamConfig, default: u32) -> u32 {
 
 pub struct NativePlayback {
     stream: Option<Stream>,
+    /// pacat 子进程（虚拟麦克风等 pulse: 后端），普通 cpal 播放为 None。
+    pacat: Option<std::process::Child>,
+    worker: Option<std::thread::JoinHandle<()>>,
     stop: Arc<AtomicBool>,
     info: NativeOutputInfo,
 }
@@ -84,6 +87,15 @@ impl NativePlayback {
         mut render: Box<dyn NativeRender>,
         mut on_error: Box<dyn FnMut(String) + Send>,
     ) -> Result<Self, String> {
+        let stop = Arc::new(AtomicBool::new(false));
+
+        // pulse:<sink>：cpal 的 ALSA host 看不到 pactl 逻辑 sink，改用 pacat
+        // 子进程播放到指定 sink（虚拟麦克风的写入端）。worker 线程周期性调用
+        // render.fill 产出 PCM 写 pacat stdin，复用同一条解码/抖动管线。
+        if let Some(sink) = id.strip_prefix("pulse:") {
+            return Self::start_pacat(sink, render, on_error, stop);
+        }
+
         let host = cpal::default_host();
         let device = if id.is_empty() || id == "default" {
             host.default_output_device()
@@ -99,7 +111,6 @@ impl NativePlayback {
         let sample_rate = config.sample_rate;
         let channels = config.channels;
         let period = frames_of(&config, 1024);
-        let stop = Arc::new(AtomicBool::new(false));
 
         // 预分配的 timing scratch 在回调里只更新、不分配；NativeOutputTiming 是 Copy。
         let mut prev_callback: Option<Instant> = None;
@@ -132,6 +143,8 @@ impl NativePlayback {
 
         Ok(Self {
             stream: Some(stream),
+            pacat: None,
+            worker: None,
             stop,
             info: NativeOutputInfo {
                 sample_rate,
@@ -146,11 +159,100 @@ impl NativePlayback {
         })
     }
 
+    /// pacat-backed playback for a named PulseAudio sink (virtual microphone).
+    fn start_pacat(
+        sink: &str,
+        mut render: Box<dyn NativeRender>,
+        mut on_error: Box<dyn FnMut(String) + Send>,
+        stop: Arc<AtomicBool>,
+    ) -> Result<Self, String> {
+        use std::io::Write;
+        use std::time::Duration;
+
+        const RATE: u32 = 48_000;
+        const CHANNELS: u16 = 2;
+        const FRAMES: usize = 960; // 20 ms
+
+        let mut child = std::process::Command::new("pacat")
+            .args([
+                "--playback",
+                "--device", sink,
+                "--format=float32le", "--rate=48000", "--channels=2", "--latency-msec=20",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("pacat spawn: {e}"))?;
+        let mut stdin = child.stdin.take().ok_or("pacat stdin missing")?;
+
+        let worker_stop = stop.clone();
+        let worker = std::thread::Builder::new()
+            .name("oink-vmic-playback".into())
+            .spawn(move || {
+                let mut pcm = [0.0f32; FRAMES * CHANNELS as usize];
+                let mut interval = std::time::Instant::now();
+                let mut first_error = true;
+                while !worker_stop.load(Ordering::Acquire) {
+                    let now = std::time::Instant::now();
+                    let timing = NativeOutputTiming {
+                        period_frames: FRAMES as u32,
+                        native_gap_frames: None,
+                        callback_at: now,
+                        playback_at: None,
+                        sample_rate: RATE,
+                        channels: CHANNELS,
+                        padding_frames: 0,
+                        buffer_frames: FRAMES as u32,
+                    };
+                    let work_started = std::time::Instant::now();
+                    render.fill(&mut pcm, timing);
+                    render.complete(work_started.elapsed());
+                    let bytes: Vec<u8> = pcm.iter().flat_map(|v| v.to_le_bytes()).collect();
+                    if stdin.write_all(&bytes).is_err() {
+                        if first_error {
+                            first_error = false;
+                            on_error("pacat stdin closed".into());
+                        }
+                        break;
+                    }
+                    // 20ms 节拍，超限不补帧（与实时回调语义一致，宁可欠载不堆积）。
+                    interval += Duration::from_millis(20);
+                    let wait = interval.saturating_duration_since(std::time::Instant::now());
+                    if wait > Duration::ZERO {
+                        std::thread::sleep(wait);
+                    } else {
+                        interval = std::time::Instant::now();
+                    }
+                }
+            })
+            .map_err(|e| format!("spawn pacat playback worker: {e}"))?;
+
+        Ok(Self {
+            stream: None,
+            pacat: Some(child),
+            worker: Some(worker),
+            stop,
+            info: NativeOutputInfo {
+                sample_rate: RATE,
+                channels: CHANNELS,
+                sample_format: "f32",
+                period_frames: FRAMES as u32,
+                backend: "pulse-pacat",
+            },
+        })
+    }
+
     pub fn shutdown(&mut self) -> bool {
         self.stop.store(true, Ordering::Release);
         if let Some(stream) = self.stream.take() {
             let _ = stream.pause();
             drop(stream);
+        }
+        if let Some(mut child) = self.pacat.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
         }
         true
     }

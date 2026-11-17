@@ -1,6 +1,6 @@
 //! Streaming windowed-sinc conversion with anti-aliasing on downsampling.
 //! Fixed history and coefficient tables; independent of native callback boundaries.
-#[cfg(any(target_os = "macos", windows, test))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux", test))]
 pub(super) struct Resampler {
     history: [f32; 64],
     coefficients: Vec<[f32; 64]>,
@@ -8,7 +8,7 @@ pub(super) struct Resampler {
     next_output: f64,
     step: f64,
 }
-#[cfg(any(target_os = "macos", windows, test))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux", test))]
 impl Resampler {
     pub fn new(rate: u32) -> Self {
         let cutoff = (48_000.0 / f64::from(rate)).min(1.0) * 0.90;

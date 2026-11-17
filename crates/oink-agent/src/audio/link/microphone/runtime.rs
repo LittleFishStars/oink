@@ -256,12 +256,12 @@ impl Runtime {
                     tracing::warn!(%error, "microphone default input inspection failed");
                 }
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             let output = match mic::virtual_output() {
                 Ok(mic::VirtualOutput::Ready { render_id, .. }) => Some(render_id),
                 _ => None,
             };
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             self.update_output(owner, output);
             self.revision = revision;
             self.discovered = true;

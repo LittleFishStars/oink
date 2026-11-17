@@ -1,7 +1,7 @@
 //! Explicit-device microphone capture. Constructing/querying never opens a mic.
 //! The coordinator owns demand leases; dropping Capture closes the OS stream.
 //! Policy, demand leases and media transport belong to the agent's microphone actor.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 mod capture;
 mod resample;
 mod selection;
@@ -11,10 +11,12 @@ pub use selection::{DefaultInputHistory, InputCandidate, InputSelection, Selecti
 mod windows;
 #[cfg(windows)]
 mod windows_default;
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 pub use capture::{Capture, default_input, input_candidates, inputs, switch_default_input, virtual_output};
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "linux")]
+mod linux;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InputDevice {
@@ -41,6 +43,8 @@ pub enum Permission {
 }
 #[cfg(target_os = "macos")]
 pub use macos::DemandMonitor;
+#[cfg(target_os = "linux")]
+pub use linux::DemandMonitor;
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 pub use windows::{DemandMonitor, WorkerApartment};
@@ -56,7 +60,9 @@ pub fn permission() -> Permission {
     return macos::permission();
     #[cfg(windows)]
     return Permission::SystemControlled;
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    return Permission::SystemControlled;
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     Permission::Unsupported
 }
 
@@ -83,11 +89,11 @@ pub fn request_permission() -> Result<(), String> {
     Err("microphone authorization is managed by the operating system".into())
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 pub fn inputs() -> Result<Vec<InputDevice>, String> {
     Ok(Vec::new())
 }
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 pub fn virtual_output() -> Result<VirtualOutput, String> {
     Ok(VirtualOutput::Unsupported)
 }
