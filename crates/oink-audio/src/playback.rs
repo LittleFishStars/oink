@@ -14,11 +14,13 @@ use std::time::{Duration, Instant};
 use crate::macos_playback::{NativeOutputTiming, NativePlayback};
 #[cfg(windows)]
 use crate::windows_playback::{NativeOutputTiming, NativePlayback};
+#[cfg(target_os = "linux")]
+use crate::linux_playback::{NativeOutputTiming, NativePlayback};
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 use unsupported::{NativeOutputTiming, NativePlayback};
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 mod unsupported {
     use super::Instant;
     #[derive(Clone, Copy)]

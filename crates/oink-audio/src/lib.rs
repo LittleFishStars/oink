@@ -47,6 +47,8 @@ mod wasapi_timing;
 mod windows;
 #[cfg(windows)]
 mod windows_playback;
+#[cfg(target_os = "linux")]
+mod linux_playback;
 #[cfg(windows)]
 pub(crate) mod windows_timer;
 #[cfg(target_os = "macos")]
