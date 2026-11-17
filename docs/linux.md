@@ -13,7 +13,8 @@ Oink 的 Linux 支持（niri + Wayland）在 `linux-niri` 分支上开发。本�
 | 剪贴板共享 | ✅ | Wayland data_control（text/html/png）；双向同步；本机→对端 capture、对端→本机 write_native_guarded。接收端复用 Mac 的 portable 异构路径，过期 offer 直接丢弃由新 offer 接管 |
 | 组合键转发 | ✅ | evdev 自动重复(value=2)按「仍按下」上报，避免修饰键被提前释放 |
 | 文件拖拽（DnD） | ❌ | Linux DnD 后端为 Unsupported（platform_dnd） |
-| 音频转发 / 虚拟麦克风 | ❌ | Linux 音频后端为 Unsupported（playback/microphone stub） |
+| 音频播放（对端→本机） | ✅ | cpal ALSA host 输出，48k/stereo/f32 |
+| 系统音频捕获 / 虚拟麦克风 | ❌ | 需 PulseAudio/PipeWire monitor；mute 无法等价实现，暂未移植 |
 | 开机自启 / 自动更新 | ❌ | UnsupportedPlatform / OsUnsupported |
 
 ## 源机捕获（本机控制其他设备）
