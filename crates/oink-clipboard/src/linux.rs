@@ -426,28 +426,18 @@ impl ClipboardBackend for LinuxClipboard {
                 if rep.standard.is_none() {
                     continue;
                 }
-                // 跨端同步的写入完成会在源机触发新 capture，瞬态挤掉当前 offer
-                // 的读取（Superseded）。短暂重试让竞态窗口过去；若 offer 真被新
-                // 内容取代，重试仍失败且上层 may_write/guard 会终止，不会错写旧数据。
-                let mut reader = None;
-                for attempt in 0..3 {
-                    match spec.contents.open(rep.id) {
-                        Ok(r) => {
-                            reader = Some(r);
-                            break;
-                        }
-                        Err(e) => {
-                            let reason = content::reason(&e);
-                            let superseded = reason == Unavailable::Superseded;
-                            tracing::warn!(target: "oink_clip", rep_id = rep.id.0, ?reason, attempt, "apply: 远端表示读取失败");
-                            if !superseded || attempt == 2 {
-                                return Err(ClipboardError::ContentUnavailable(reason));
-                            }
-                            std::thread::sleep(Duration::from_millis(150));
-                        }
+                // offer 被源端新 capture 取代时 source 永久无效（Superseded），重试永远
+                // 失败——这是 offer 过期而非瞬态，不是网络抖动。直接放弃本次该表示：
+                // 源端新的 offer 到达后经 ordering.receive 替换 current 重新 apply，
+                // 不会卡死后续同步。
+                let mut reader = match spec.contents.open(rep.id) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let reason = content::reason(&e);
+                        tracing::warn!(target: "oink_clip", rep_id = rep.id.0, ?reason, "apply: 远端表示读取失败");
+                        return Err(ClipboardError::ContentUnavailable(reason));
                     }
-                }
-                let mut reader = reader.ok_or_else(|| ClipboardError::ContentUnavailable(Unavailable::Superseded))?;
+                };
                 let mut bytes = Vec::new();
                 reader
                     .read_to_end(&mut bytes)
