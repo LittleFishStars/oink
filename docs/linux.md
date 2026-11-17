@@ -10,7 +10,11 @@ Oink 的 Linux 支持（niri + Wayland）在 `linux-niri` 分支上开发。本�
 | 双向鼠标穿越 | ✅ | 触摸板（ABS_MT 差分）+ 物理鼠标（REL）+ 蓝牙鼠标（能力矩阵分类 + 热插拔） |
 | win → Linux 控制 | ✅ | 注入热路径零 syscall，CursorRead 读回按平台条件跳过 |
 | 关窗后台运行 | ✅ | 关窗仅隐藏窗口，agent 继续工作；托盘恢复；托盘菜单退出 |
-| 剪贴板 / 拖拽 / 音频 | ❌ | 尚未移植（Linux DnD/音频后端为 Unsupported） |
+| 剪贴板共享 | ✅ | Wayland data_control（text/html/png）；双向同步；本机→对端 capture、对端→本机 write_native_guarded。接收端复用 Mac 的 portable 异构路径，过期 offer 直接丢弃由新 offer 接管 |
+| 组合键转发 | ✅ | evdev 自动重复(value=2)按「仍按下」上报，避免修饰键被提前释放 |
+| 文件拖拽（DnD） | ❌ | Linux DnD 后端为 Unsupported（platform_dnd） |
+| 音频转发 / 虚拟麦克风 | ❌ | Linux 音频后端为 Unsupported（playback/microphone stub） |
+| 开机自启 / 自动更新 | ❌ | UnsupportedPlatform / OsUnsupported |
 
 ## 源机捕获（本机控制其他设备）
 

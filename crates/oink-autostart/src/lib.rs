@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(any(windows, test))]
 mod run_entry;
 #[cfg(windows)]
@@ -183,7 +185,9 @@ fn user_status() -> LaunchAtLoginStatus {
     return macos::status();
     #[cfg(windows)]
     return windows::status();
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    return linux::status();
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     LaunchAtLoginStatus::unavailable(LaunchAtLoginProblem::UnsupportedPlatform)
 }
 
@@ -192,7 +196,9 @@ fn set_user_enabled(enabled: bool) -> Result<LaunchAtLoginStatus, String> {
     return macos::set_enabled(enabled);
     #[cfg(windows)]
     return windows::set_enabled(enabled);
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    return linux::set_enabled(enabled);
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = enabled;
         Err("unsupported_platform".into())
@@ -272,7 +278,9 @@ pub fn open_system_settings() -> Result<(), String> {
     return macos::open_system_settings();
     #[cfg(windows)]
     return windows::open_system_settings();
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    return linux::open_system_settings();
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     Err("unsupported_platform".into())
 }
 
