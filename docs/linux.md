@@ -12,7 +12,7 @@ Oink 的 Linux 支持（niri + Wayland）在 `linux-niri` 分支上开发。本�
 | 关窗后台运行 | ✅ | 关窗仅隐藏窗口，agent 继续工作；托盘恢复；托盘菜单退出 |
 | 剪贴板共享 | ✅ | Wayland data_control（text/html/png）；双向同步；本机→对端 capture、对端→本机 write_native_guarded。接收端复用 Mac 的 portable 异构路径，过期 offer 直接丢弃由新 offer 接管 |
 | 组合键转发 | ✅ | evdev 自动重复(value=2)按「仍按下」上报，避免修饰键被提前释放 |
-| 文件拖拽（DnD） | ❌ | Linux DnD 后端为 Unsupported（platform_dnd） |
+| 文件拖拽（DnD） | ❌ | Wayland 协议限制，见下节「文件拖拽为何不可行」 |
 | 音频播放（对端→本机） | ✅ | cpal ALSA host 输出，48k/stereo/f32 |
 | 系统音频捕获 | ✅ | pactl null sink 路由（转发时物理扬声器静音）+ parec 从 monitor 读 48k/stereo/f32，需 pulseaudio-utils/pipewire-pulse |
 | 虚拟麦克风 | ✅ | pactl 建 null sink + remap-source（`oink_mic`），对端麦克风音频经 pacat 写入；demand 用 source-outputs 轮询；需 pulseaudio-utils/pipewire-pulse |
@@ -44,6 +44,26 @@ cursor {
 ```
 
 `niri msg action load-config-file` 热加载，无需重启会话。
+
+## 文件拖拽为何不可行（Wayland 协议限制）
+
+oink 的 DnD 需要由后台 agent **发起一次系统拖拽**（把对端文件放给本机应用）。Windows（OLE
+`IDropSource` + `DoDragDrop`）与 macOS（`NSDraggingSource`）都支持，Wayland 不支持：
+
+- `wl_data_device.start_drag` 要求 origin surface 持有**匹配 serial 的 implicit grab**（该
+  surface 刚收到真实的 button press）。这是合成器强制的校验。
+- 指针焦点归合成器所有，**只由物理输入驱动**。`zwlr_virtual_pointer` 的 motion 能改变光标
+  坐标，但合成器不会因此重做 hit-test、也不会向我们的 surface 派发 `enter`/`button`。
+- 因此拿不到 serial，`start_drag` 无从调用。
+
+实测（`cargo run -p oink-wayland --example dnd_poc`，niri 25.x，2026-11-17）：
+globals 齐全、layer surface 正常映射并收到一次 `enter`（来自物理指针）；注入 motion 后
+ledger 坐标正确但无新 `enter`、无 `button`、无 serial → 判定不可行。
+
+这与「光标隐藏不可行」是同一类安全设计：客户端不能互相夺走指针焦点。
+
+**替代方案**：对端拖来的文件落盘到接收目录后，写入系统剪贴板（文本路径/URI），用户手动
+粘贴。Linux 剪贴板已可用（见上表），不需要额外后端。
 
 ## 窗口语义
 
