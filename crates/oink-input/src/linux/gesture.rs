@@ -9,7 +9,39 @@
 //! AppKit: a gesture begins once travel passes a slop, reports cumulative
 //! progress while it moves, and ends on lift-off.
 
+use oink_foundation::contacts::{Contact, Sample, Surface, MAX_CONTACTS};
 use oink_foundation::input::{Gesture, GesturePhase, SwipeAxis};
+use std::collections::BTreeMap;
+
+/// Fixed reference surface for synthesised contact samples. evdev touchpad
+/// coordinates (typically a few thousand units) are clamped into it; contacts
+/// exist only to select the receiving side's native touchpad path, not for
+/// precise positioning (motion still travels as PointerDelta/Gesture).
+const SURFACE: Surface = Surface { width: 10_000, height: 10_000 };
+
+/// Build a validated contact sample from the active slots. Returns None when
+/// there are no fingers. `device` is a stable nonzero tag for this touchpad.
+pub fn contact_sample(device: u32, fingers: &BTreeMap<i32, (f64, f64)>, now_us: u64) -> Option<Sample> {
+    if fingers.is_empty() {
+        return None;
+    }
+    let mut sample = Sample {
+        device: if device == 0 { 1 } else { device },
+        time_us: now_us,
+        surface: SURFACE,
+        len: 0,
+        contacts: [Contact::default(); MAX_CONTACTS],
+    };
+    for (index, (_slot, (x, y))) in fingers.iter().enumerate().take(MAX_CONTACTS) {
+        sample.contacts[index] = Contact {
+            id: (index as u32) + 1,
+            x: (x.clamp(0.0, SURFACE.width as f64) as i32),
+            y: (y.clamp(0.0, SURFACE.height as f64) as i32),
+        };
+        sample.len += 1;
+    }
+    sample.valid().then_some(sample)
+}
 
 /// Travel (in touchpad units) before a gesture is recognised as such.
 const SLOP: f64 = 60.0;
@@ -239,5 +271,33 @@ mod tests {
             }
             _ => panic!("distance change should start a pinch"),
         }
+    }
+}
+
+#[cfg(test)]
+mod sample_tests {
+    use super::*;
+
+    #[test]
+    fn builds_valid_sample_from_fingers() {
+        let mut fingers = BTreeMap::new();
+        fingers.insert(0, (100.0, 200.0));
+        fingers.insert(1, (300.0, 400.0));
+        let sample = contact_sample(7, &fingers, 1234).unwrap();
+        assert_eq!(sample.len, 2);
+        assert!(sample.valid());
+        assert_eq!(sample.points()[0].id, 1);
+        assert_eq!(sample.points()[1].id, 2);
+    }
+
+    #[test]
+    fn clamps_out_of_range_coordinates() {
+        let mut fingers = BTreeMap::new();
+        fingers.insert(0, (99_999.0, -5.0));
+        let sample = contact_sample(0, &fingers, 1).unwrap();
+        assert!(sample.valid());
+        assert_eq!(sample.device, 1);
+        assert_eq!(sample.points()[0].x, 10_000);
+        assert_eq!(sample.points()[0].y, 0);
     }
 }
