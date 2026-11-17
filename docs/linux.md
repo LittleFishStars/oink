@@ -62,8 +62,14 @@ ledger 坐标正确但无新 `enter`、无 `button`、无 serial → 判定不�
 
 这与「光标隐藏不可行」是同一类安全设计：客户端不能互相夺走指针焦点。
 
-**替代方案**：对端拖来的文件落盘到接收目录后，写入系统剪贴板（文本路径/URI），用户手动
-粘贴。Linux 剪贴板已可用（见上表），不需要额外后端。
+**替代方案（已实现接收端）**：对端拖来的文件不再尝试原生放置，而是直接保存到 XDG 下载
+目录（`$XDG_DOWNLOAD_DIR`，未设则 `~/Downloads`），保存后把路径写入系统剪贴板供粘贴。
+- 文件名经 `safe_relative` 校验：绝对路径、`..`、反斜杠一律拒绝，防止逃逸下载目录；
+- 同名文件自动加 `(1)` 后缀，不覆盖已有文件；
+- 已保存时打 info 日志（`dnd landing: saved files`）。
+- 实现：`crates/oink-agent/src/dnd/landing.rs` + `crates/oink-clipboard/src/linux_dnd.rs`
+  （最小 Linux DndBackend，只为让管线建立，不做原生拖拽）。
+- 未实现发送端：本机把文件拖给对端仍不可行（无法发起原生拖拽）。
 
 ## 窗口语义
 

@@ -118,6 +118,8 @@ pub mod dnd;
 pub mod formats;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "linux")]
+mod linux_dnd;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
@@ -342,6 +344,18 @@ pub fn platform_backend() -> Result<Box<dyn ClipboardBackend>, ClipboardError> {
     return linux::LinuxClipboard::connect().map(|b| Box::new(b) as Box<dyn ClipboardBackend>);
     #[allow(unreachable_code)]
     Err(ClipboardError::Unsupported)
+}
+
+/// 把 mime→字节 载荷写入系统剪贴板（不需要持有 backend 句柄）。
+/// 平台不支持时返回 `Unsupported`。
+pub fn write_raw_payload(payload: std::collections::HashMap<String, Vec<u8>>) -> Result<(), ClipboardError> {
+    #[cfg(target_os = "linux")]
+    return linux::write_payload(payload);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = payload;
+        Err(ClipboardError::Unsupported)
+    }
 }
 
 // Exercise the pure Windows bitmap codec on every development platform.

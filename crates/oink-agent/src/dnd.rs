@@ -14,6 +14,9 @@ use oink_routing::{DndCmd, DndEvent, DndSourceEffect, DndTarget};
 
 use crate::node::{Inner, Node};
 
+#[cfg(target_os = "linux")]
+mod landing;
+
 /// A drag whose native content originates on this device.
 struct LocalDrag {
     _update_activity: Option<oink_foundation::maintenance::Lease>,
@@ -753,7 +756,40 @@ impl DndGlue {
         } else {
             self.backend.begin(spec)
         };
-        #[cfg(not(target_os = "macos"))]
+        // Wayland 无法由后台进程发起原生拖拽（docs/linux.md）：不调用
+        // backend.begin，改为把对端文件直接落盘到下载目录并写入剪贴板，
+        // 用户随后手动粘贴。返回 Ok 让流程认为"放置已被接受"。
+        #[cfg(target_os = "linux")]
+        let result: Result<(), oink_clipboard::ClipboardError> = {
+            let files = spec.files.clone();
+            let entries: Vec<oink_foundation::clipboard::FileEntry> = spec
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    ClipData::Files(files) => Some(files.as_slice()),
+                    _ => None,
+                })
+                .flatten()
+                .cloned()
+                .collect();
+            match files {
+                Some(contents) if !entries.is_empty() => {
+                    std::thread::Builder::new()
+                        .name("oink-dnd-land".into())
+                        .spawn(move || match landing::land(contents, &entries) {
+                            Ok(paths) => {
+                                tracing::info!(count = paths.len(), "dnd landing: saved files");
+                                landing::publish_paths(&paths);
+                            }
+                            Err(error) => tracing::warn!(%error, "dnd landing: save failed"),
+                        })
+                        .ok();
+                    Ok(())
+                }
+                _ => Err(oink_clipboard::ClipboardError::Unsupported),
+            }
+        };
+        #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
         let result = self.backend.begin(spec);
         if result.is_err() {
             self.backend.target_start_timing(operation, None);

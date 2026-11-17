@@ -473,6 +473,14 @@ impl ClipboardBackend for LinuxClipboard {
     }
 }
 
+/// 一次性把 mime→字节 载荷写入系统剪贴板（新建短期连接；供 DnD 落盘后
+/// 发布文件路径等场景使用，不长期持有选择权）。
+pub fn write_payload(payload: HashMap<String, Vec<u8>>) -> Result<(), ClipboardError> {
+    let clip = LinuxClipboard::connect()?;
+    clip.publish_payload(payload, Sensitivity::Normal)?;
+    Ok(())
+}
+
 impl Drop for LinuxClipboard {
     fn drop(&mut self) {
         self.pump_done.store(true, Ordering::Release);

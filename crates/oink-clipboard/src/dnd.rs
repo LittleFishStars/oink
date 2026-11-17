@@ -472,6 +472,8 @@ pub fn platform_dnd() -> Result<Box<dyn DndBackend>, ClipboardError> {
     return Ok(Box::new(crate::macos::dnd::MacDnd::new()));
     #[cfg(windows)]
     return crate::windows::dnd::backend();
+    #[cfg(target_os = "linux")]
+    return crate::linux_dnd::backend();
     #[allow(unreachable_code)]
     Err(ClipboardError::Unsupported)
 }
